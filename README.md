@@ -7,6 +7,22 @@ nights, and a few photos of the two of you.
 Everything runs on your computer. Your photos are not uploaded anywhere. The only things fetched from
 the internet are map tiles and place names (OpenStreetMap), and the face models the first time.
 
+## What it looks like
+
+These screenshots use made-up demo photos and names. In the real app the maps are OpenStreetMap street maps.
+
+| A page per trip | The cover page |
+| --- | --- |
+| <img src="docs/screenshots/pdf-trip.png" width="400" alt="A trip page with a map, the places visited, and four photos"> | <img src="docs/screenshots/pdf-cover.png" width="400" alt="The cover page with an overview map and a table of trips"> |
+
+**Choose your photos and dates**
+
+<img src="docs/screenshots/app-setup.png" width="800" alt="The setup screen: photo folder, reference photos, dates and home town">
+
+**Check each trip and swap photos** (green tags mark photos where both of you were recognised)
+
+<img src="docs/screenshots/app-review.png" width="800" alt="Reviewing a trip: the chosen photos and other photos to pick from">
+
 ## Start it
 
 1. Install Python 3 from <https://www.python.org/downloads/> if you don't have it

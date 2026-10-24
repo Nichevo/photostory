@@ -10,6 +10,7 @@ from .util import APP_DIR, USER_AGENT
 TILE = 256
 TILE_URL = "https://tile.openstreetmap.org/{z}/{x}/{y}.png"
 ACCENT = (200, 40, 60)
+CREDIT = "© OpenStreetMap contributors"
 _offline = False
 
 
@@ -98,7 +99,7 @@ def render(points, size=(1200, 700), route=None, labels=None, max_zoom=12, min_z
         text = str(labels[i]) if labels else str(i + 1)
         draw.text((x, y), text, fill=(255, 255, 255), font=font, anchor="mm")
     small = _font(16)
-    credit = "© OpenStreetMap contributors" if got_tiles else "Map tiles unavailable (offline)"
+    credit = CREDIT if got_tiles else "Map tiles unavailable (offline)"
     tw = draw.textlength(credit, font=small)
     draw.rectangle([W - tw - 16, H - 26, W, H], fill=(255, 255, 255))
     draw.text((W - tw - 8, H - 23), credit, fill=(60, 60, 60), font=small)
