@@ -1,0 +1,256 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PhotoStory</title>
+<style>
+  :root { --ink:#1f2328; --muted:#6a737d; --line:#d0d7de; --bg:#f6f8fa; --card:#fff; --accent:#c8283c; --ok:#1a7f37; }
+  * { box-sizing: border-box; }
+  body { margin:0; font: 15px/1.45 -apple-system, "Segoe UI", Roboto, Arial, sans-serif; color:var(--ink); background:var(--bg); }
+  main { max-width: 1100px; margin: 0 auto; padding: 24px 16px 80px; }
+  h1 { font-size: 24px; margin: 0 0 4px; }
+  h2 { font-size: 18px; margin: 0 0 12px; }
+  .sub { color: var(--muted); margin: 0 0 20px; }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 18px; margin-bottom: 16px; }
+  label { display:block; font-weight:600; font-size:13px; margin: 12px 0 4px; }
+  .hint { font-weight: 400; color: var(--muted); }
+  input[type=text], input[type=date], input[type=number], textarea { width:100%; padding:8px 10px; border:1px solid var(--line); border-radius:6px; font:inherit; background:#fff; }
+  textarea { min-height: 56px; resize: vertical; }
+  .row { display:flex; gap:10px; align-items:flex-end; flex-wrap: wrap; }
+  .row > * { flex: 1 1 160px; }
+  .pathrow { display:flex; gap:8px; } .pathrow input { flex:1; }
+  button { font: inherit; padding: 8px 14px; border-radius: 6px; border: 1px solid var(--line); background: #fff; cursor: pointer; }
+  button.primary { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 600; }
+  button:disabled { opacity: .5; cursor: default; }
+  details summary { cursor: pointer; color: var(--muted); margin-top: 14px; }
+  .bar { height: 8px; background: #e6e9ec; border-radius: 4px; overflow: hidden; margin: 10px 0 6px; }
+  .bar div { height: 100%; background: var(--accent); width: 0; transition: width .3s; }
+  .err { color: var(--accent); font-weight: 600; }
+  .notes li { color: var(--muted); }
+  .trip.off { opacity: .55; }
+  .trip-head { display:flex; gap:12px; align-items:flex-start; }
+  .trip-head input[type=checkbox] { width:20px; height:20px; margin-top:8px; }
+  .trip-head .title { font-size:17px; font-weight:600; }
+  .meta { color: var(--muted); font-size: 13px; margin: 4px 0 0; }
+  .strip { display:flex; flex-wrap:wrap; gap:8px; margin-top:8px; }
+  .ph { position:relative; width:150px; height:112px; border-radius:6px; overflow:hidden; cursor:pointer; background:#e6e9ec; border: 3px solid transparent; }
+  .ph img { width:100%; height:100%; object-fit:cover; display:block; }
+  .ph.sel { border-color: var(--accent); }
+  .ph .tag { position:absolute; left:4px; bottom:4px; background:rgba(0,0,0,.65); color:#fff; font-size:11px; padding:1px 6px; border-radius:4px; }
+  .ph .tag.both { background: var(--ok); }
+  .ph .num { position:absolute; right:4px; top:4px; background:var(--accent); color:#fff; font-size:12px; font-weight:700; width:22px; height:22px; border-radius:50%; text-align:center; line-height:22px; }
+  .section-label { font-size:12px; font-weight:700; text-transform:uppercase; letter-spacing:.04em; color:var(--muted); margin-top:14px; }
+  .sticky { position: sticky; bottom: 0; background: var(--bg); padding: 12px 0; border-top: 1px solid var(--line); display:flex; gap:12px; align-items:center; flex-wrap:wrap; }
+  .hidden { display:none !important; }
+  a { color: var(--accent); }
+</style>
+</head>
+<body>
+<main>
+  <h1>PhotoStory</h1>
+  <p class="sub">Find the trips you took together in your photos, choose a few photos for each, and make a PDF.</p>
+
+  <section class="card" id="setup">
+    <h2>1. Choose your photos</h2>
+    <label>Photo folder <span class="hint">(for example Dropbox › Camera Uploads; subfolders are included)</span></label>
+    <div class="pathrow"><input type="text" id="photos" placeholder="/Users/you/Dropbox/Camera Uploads"><button data-browse="photos">Browse…</button></div>
+
+    <label>Reference photos of each of you <span class="hint">(optional: a folder with one subfolder per person, such as Alex and Sam, holding 5 to 10 clear photos of just that person)</span></label>
+    <div class="pathrow"><input type="text" id="people_dir" placeholder="/Users/you/PhotoStory/people"><button data-browse="people_dir">Browse…</button></div>
+
+    <div class="row">
+      <div><label>From</label><input type="date" id="date_from"></div>
+      <div><label>To</label><input type="date" id="date_to"></div>
+    </div>
+
+    <label>Home <span class="hint">(town name or “lat, lon”, one per line if you've lived in more than one place; leave blank to guess)</span></label>
+    <textarea id="home" placeholder="Bristol, UK"></textarea>
+
+    <details>
+      <summary>More options</summary>
+      <div class="row">
+        <div><label>Counts as a trip beyond (km from home)</label><input type="number" id="min_km" min="1"></div>
+        <div><label>Shortest trip (nights, 0 = include day trips)</label><input type="number" id="min_nights" min="0"></div>
+        <div><label>Photos per trip</label><input type="number" id="photos_per_trip" min="1" max="6"></div>
+      </div>
+    </details>
+
+    <p><button class="primary" id="scan">Find trips</button></p>
+    <div id="progress" class="hidden"><div class="bar"><div></div></div><div id="msg" class="meta"></div></div>
+    <p id="scanerr" class="err hidden"></p>
+  </section>
+
+  <section id="review" class="hidden">
+    <div class="card">
+      <h2>2. Check the trips</h2>
+      <p class="meta" id="summary"></p>
+      <ul class="notes" id="notes"></ul>
+      <label>Document title</label>
+      <input type="text" id="doc_title" placeholder="Travelling together: Alex & Sam">
+      <p class="meta">Untick a trip to leave it out. Click a photo below a trip to add it, or click a chosen photo to remove it. Green tags mark photos where both of you were recognised.</p>
+    </div>
+    <div id="trips"></div>
+    <div class="sticky">
+      <button class="primary" id="build">Make PDF</button>
+      <span id="buildmsg" class="meta"></span>
+    </div>
+  </section>
+</main>
+
+<script>
+const $ = (id) => document.getElementById(id);
+const FIELDS = ["photos", "people_dir", "date_from", "date_to", "home", "min_km", "min_nights", "photos_per_trip"];
+let project = null;
+let saveTimer = null;
+
+async function api(path, body) {
+  const r = await fetch(path, body === undefined ? {} : {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify(body)});
+  const data = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(data.error || r.statusText);
+  return data;
+}
+
+const thumb = (p, s = 360) => "/thumb?s=" + s + "&p=" + encodeURIComponent(p);
+const fmt = (iso) => new Date(iso).toLocaleDateString(undefined, {day: "numeric", month: "short", year: "numeric"});
+const esc = (s) => String(s ?? "").replace(/[&<>"]/g, c => ({"&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;"}[c]));
+
+async function init() {
+  const st = await api("/api/state");
+  for (const f of FIELDS) $(f).value = st.settings[f] ?? "";
+  if (st.job.running) poll();
+  if (st.project) showProject(st.project);
+}
+
+document.querySelectorAll("[data-browse]").forEach(b => b.onclick = async () => {
+  const field = $(b.dataset.browse);
+  b.disabled = true;
+  try {
+    const r = await api("/api/pick-folder", {start: field.value});
+    if (r.available === false) alert("A folder picker isn't available on this computer. Please paste the folder path instead.");
+    else if (r.path) field.value = r.path;
+  } finally { b.disabled = false; }
+});
+
+$("scan").onclick = async () => {
+  const s = {};
+  for (const f of FIELDS) s[f] = $(f).value;
+  $("scanerr").classList.add("hidden");
+  try { await api("/api/scan", s); poll(); }
+  catch (e) { $("scanerr").textContent = e.message; $("scanerr").classList.remove("hidden"); }
+};
+
+async function poll() {
+  $("scan").disabled = true;
+  $("progress").classList.remove("hidden");
+  const job = await api("/api/job");
+  $("progress").querySelector(".bar div").style.width = job.pct + "%";
+  $("msg").textContent = job.msg;
+  if (job.running) return setTimeout(poll, 700);
+  $("scan").disabled = false;
+  if (job.error) { $("scanerr").textContent = "Something went wrong: " + job.error; $("scanerr").classList.remove("hidden"); return; }
+  const st = await api("/api/state");
+  if (st.project) showProject(st.project);
+}
+
+function showProject(p) {
+  project = p;
+  $("review").classList.remove("hidden");
+  $("doc_title").value = p.title || "";
+  const nights = p.trips.reduce((a, t) => a + t.nights, 0);
+  $("summary").textContent = `${p.photo_total} photos in the date range. Found ${p.trips.length} trips, ${nights} nights away.` +
+    (p.people && p.people.length ? ` Looking for: ${p.people.join(" and ")}.` : " No reference photos were given, so photos were chosen by quality and spread over each trip.");
+  $("notes").innerHTML = (p.notes || []).map(n => `<li>${esc(n)}</li>`).join("");
+  $("trips").innerHTML = "";
+  p.trips.forEach((t, i) => $("trips").appendChild(tripCard(t, i)));
+}
+
+function tag(ph) {
+  if (!project.people || !project.people.length || !ph.people) return "";
+  if (ph.people.length && ph.people.length === project.people.length) return `<span class="tag both">Both</span>`;
+  if (ph.people.length) return `<span class="tag">${esc(ph.people.join(", "))}</span>`;
+  return "";
+}
+
+function tripCard(t, i) {
+  const el = document.createElement("section");
+  el.className = "card trip" + (t.include ? "" : " off");
+  const stops = [...t.stops].sort((a, b) => a.first.localeCompare(b.first))
+    .map(s => s.place && (s.place.city || s.place.country)).filter(Boolean);
+  el.innerHTML = `
+    <div class="trip-head">
+      <input type="checkbox" ${t.include ? "checked" : ""} title="Include this trip">
+      <div style="flex:1">
+        <input type="text" class="title" value="${esc(t.title)}">
+        <p class="meta">Trip ${i + 1} · ${fmt(t.start)} to ${fmt(t.end)} · ${t.nights === 0 ? "day trip" : t.nights + (t.nights === 1 ? " night" : " nights")} · ${t.photo_count} photos${stops.length ? " · " + esc([...new Set(stops)].join(", ")) : ""}</p>
+      </div>
+    </div>
+    <div class="section-label">Chosen for the PDF</div>
+    <div class="strip chosen"></div>
+    <div class="section-label">Other photos from this trip <button class="more" style="margin-left:8px;font-size:12px;padding:2px 8px">Show all</button></div>
+    <div class="strip cands"></div>
+    <label>Notes for this page <span class="hint">(optional, e.g. "Sam's sister's wedding")</span></label>
+    <textarea class="notes-in">${esc(t.notes || "")}</textarea>`;
+  const box = el.querySelector("input[type=checkbox]");
+  box.onchange = () => { t.include = box.checked; el.classList.toggle("off", !t.include); save(); };
+  el.querySelector(".title").oninput = (e) => { t.title = e.target.value; save(); };
+  el.querySelector(".notes-in").oninput = (e) => { t.notes = e.target.value; save(); };
+  let showAll = false;
+  el.querySelector(".more").onclick = (e) => { showAll = !showAll; e.target.textContent = showAll ? "Show fewer" : "Show all"; render(); };
+
+  function render() {
+    const byPath = Object.fromEntries(t.photos.map(p => [p.path, p]));
+    const chosen = el.querySelector(".chosen");
+    chosen.innerHTML = "";
+    t.selected.forEach((path, k) => {
+      const ph = byPath[path]; if (!ph) return;
+      const d = document.createElement("div");
+      d.className = "ph sel"; d.title = "Click to remove";
+      d.innerHTML = `<img loading="lazy" src="${thumb(path)}"><span class="num">${k + 1}</span>${tag(ph)}`;
+      d.onclick = () => { t.selected.splice(k, 1); save(); render(); };
+      chosen.appendChild(d);
+    });
+    if (!t.selected.length) chosen.innerHTML = `<p class="meta">No photos chosen. Click photos below to add them.</p>`;
+    let rest = t.photos.filter(p => !t.selected.includes(p.path));
+    if (showAll) rest.sort((a, b) => a.time.localeCompare(b.time));
+    else rest = rest.filter(p => p.score >= 0).sort((a, b) => b.score - a.score).slice(0, 18);
+    const cands = el.querySelector(".cands");
+    cands.innerHTML = "";
+    rest.forEach(ph => {
+      const d = document.createElement("div");
+      d.className = "ph"; d.title = new Date(ph.time).toLocaleString() + " · click to add";
+      d.innerHTML = `<img loading="lazy" src="${thumb(ph.path)}">${tag(ph)}`;
+      d.onclick = () => { t.selected.push(ph.path); t.selected.sort((a, b) => byPath[a].time.localeCompare(byPath[b].time)); save(); render(); };
+      cands.appendChild(d);
+    });
+  }
+  render();
+  return el;
+}
+
+function edits() {
+  return {title: $("doc_title").value, trips: project.trips.map(t => ({id: t.id, title: t.title, notes: t.notes, include: t.include, selected: t.selected}))};
+}
+
+function save() {
+  clearTimeout(saveTimer);
+  saveTimer = setTimeout(() => api("/api/project", edits()), 600);
+}
+$("doc_title").oninput = save;
+
+$("build").onclick = async () => {
+  clearTimeout(saveTimer);
+  $("build").disabled = true;
+  $("buildmsg").textContent = "Making the PDF… (maps are downloaded the first time, so this can take a minute)";
+  try {
+    const r = await api("/api/build", edits());
+    $("buildmsg").innerHTML = `Saved to <b>${esc(r.path)}</b> · <a href="${r.url}" target="_blank">Open the PDF</a>`;
+    window.open(r.url, "_blank");
+  } catch (e) { $("buildmsg").textContent = "Couldn't make the PDF: " + e.message; }
+  finally { $("build").disabled = false; }
+};
+
+init();
+</script>
+</body>
+</html>

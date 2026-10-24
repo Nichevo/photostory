@@ -1,0 +1,5 @@
+pillow>=10
+pillow-heif>=0.16
+reportlab>=4
+numpy>=1.24
+opencv-python-headless>=4.8
