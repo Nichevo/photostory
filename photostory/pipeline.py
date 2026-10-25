@@ -38,10 +38,11 @@ def run(settings, out_dir, progress=lambda pct, msg: None, cache_dir=None):
 
     stats = {}
     photos = scan_folder(settings["photos"], os.path.join(cache_dir, "scan.json"), d_from, d_to, scan_progress, stats)
+    homes, notes = [], []
+    from_timeline = add_timeline(photos, settings, cache_dir, notes, progress)
     with_gps = sum(1 for p in photos if p["lat"] is not None)
     progress(40, f"Found {len(photos)} photos in the date range ({with_gps} with a location)")
 
-    homes, notes = [], []
     for line in (settings.get("home") or "").splitlines():
         if line.strip():
             h = geo.search(line)
@@ -117,6 +118,7 @@ def run(settings, out_dir, progress=lambda pct, msg: None, cache_dir=None):
         "homes": homes,
         "notes": notes,
         "photo_total": len(photos),
+        "timeline_used": from_timeline > 0,
         "stats": stats,
         "trips": found,
         "splits": splits,
@@ -148,7 +150,32 @@ def load_photos(settings, cache_dir):
     """All photos in the story's date range (from the cache, so it's quick after a scan)."""
     d_from = date.fromisoformat(settings["date_from"]) if settings.get("date_from") else None
     d_to = date.fromisoformat(settings["date_to"]) if settings.get("date_to") else None
-    return scan_folder(settings["photos"], os.path.join(cache_dir, "scan.json"), d_from, d_to)
+    photos = scan_folder(settings["photos"], os.path.join(cache_dir, "scan.json"), d_from, d_to)
+    add_timeline(photos, settings, cache_dir, [])
+    return photos
+
+
+def add_timeline(photos, settings, cache_dir, notes, progress=lambda pct, msg: None):
+    """Fill in locations from Google Maps Timeline for photos without GPS. Returns how many."""
+    paths = [line for line in (settings.get("timeline") or "").splitlines() if line.strip()]
+    if not paths:
+        return 0
+    from collections import Counter
+
+    from . import timeline
+
+    progress(38, "Reading your Google Timeline")
+    tl = timeline.load(paths, cache_dir)
+    if not len(tl):
+        notes.append("No locations were found in the Google Timeline file. Check it's the exported Timeline.json "
+                     "(or Records.json / Semantic Location History from Google Takeout).")
+        return 0
+    zones = Counter(p["tz"] for p in photos if p.get("tz"))
+    n = timeline.fill_locations(photos, tl, zones.most_common(1)[0][0] if zones else None)
+    missing = sum(1 for p in photos if p["lat"] is None)
+    notes.append(f"Google Timeline gave a location to {n} photos without GPS"
+                 + (f"; {missing} still have none." if missing else "."))
+    return n
 
 
 def set_place(out_dir, trip_id, text):

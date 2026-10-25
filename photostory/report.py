@@ -150,7 +150,8 @@ class Report:
         self.page += 1
         self.c.setStrokeColor(RULE)
         self.c.line(M, 30, PAGE_W - M, 30)
-        self.text(M, 18, "Dates and places are taken from the metadata (EXIF) stored in the original photo files.",
+        self.text(M, 18, "Dates and places are taken from the metadata (EXIF) stored in the original photo files"
+                  + (", and Google Maps Timeline for photos without a location." if self.p.get("timeline_used") else "."),
                   7, color=MUTED)
         self.text(PAGE_W - M, 18, f"Page {self.page}", 7, color=MUTED, align="right")
         self.c.showPage()
@@ -406,6 +407,8 @@ class Report:
                 ty -= 10
             self.text(ix, ty, self.fit(line1, 8, max(iw, 120)), 8)
             src = os.path.basename(p["path"]) + (f"  ·  {p['camera']}" if p.get("camera") else "")
+            if p.get("loc_src") == "timeline":
+                src += "  ·  location from Google Timeline"
             self.text(ix, ty - 9, self.fit(src, 6.5, max(iw, 120)), 6.5, color=MUTED)
 
 

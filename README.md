@@ -72,6 +72,9 @@ map areas), so you can close the app and carry on later.
    Use clear photos from different years and angles. The subfolder names are used as your names.
    With these, PhotoStory picks photos where both of you are recognised. Without them, it picks sharp
    photos spread across each trip and you choose.
+   **Google Maps Timeline** (optional): a backup for photos with no location of their own. Each photo
+   gets the place Timeline says you were at the moment it was taken. See
+   [Exporting your Google Timeline](#exporting-your-google-timeline).
 3. **From / To**: the date range to cover. Leave both blank to look through every photo.
 4. **Home**: your town, e.g. `Bristol, UK`. Anything more than 50 km from home counts as a trip.
    Add a line for each place if you've lived in more than one.
@@ -110,6 +113,20 @@ map areas), so you can close the app and carry on later.
   with **Add a trip it didn't find**.
 * If your photos have no location, turn it on in the camera: on Samsung, Camera › Settings ›
   Location tags; on iPhone, Settings › Privacy › Location Services › Camera.
+
+## Exporting your Google Timeline
+
+Timeline is now kept on your phone, so export it from the phone that had Timeline turned on:
+
+* **Android:** Settings › Location › Location services › Timeline › **Export Timeline data**. This saves
+  `Timeline.json`; put it somewhere your PC can see (e.g. Dropbox).
+* **iPhone:** Google Maps › your profile picture › Your Timeline › ⋯ › Location & privacy settings ›
+  **Export Timeline data**.
+* **Older history** (before it moved to the phone) may be in Google Takeout: takeout.google.com ›
+  Location History (Timeline). Point PhotoStory at `Records.json` or the `Semantic Location History` folder.
+
+Add one line per file or folder if you have several (e.g. both phones). Timeline data stays on your
+computer; PhotoStory only reads it.
 
 ## Command line (optional)
 

@@ -19,7 +19,7 @@ from .images import jpeg_bytes, open_upright
 from .util import load_json, save_json
 
 STATIC = Path(__file__).with_name("static")
-DEFAULTS = {"photos": "", "people_dir": "", "date_from": "", "date_to": "", "home": "", "min_km": 50,
+DEFAULTS = {"photos": "", "people_dir": "", "timeline": "", "date_from": "", "date_to": "", "home": "", "min_km": 50,
             "max_gap_hours": 36, "min_nights": 1, "photos_per_trip": 4, "title": ""}
 
 
@@ -72,7 +72,8 @@ class App:
         if last:
             prev = self.settings()
             save_json(os.path.join(self.stories_dir, story_id, "settings.json"),
-                      {k: prev[k] for k in ("photos", "people_dir", "home", "min_km", "min_nights", "photos_per_trip")})
+                      {k: prev[k] for k in ("photos", "people_dir", "timeline", "home", "min_km", "min_nights",
+                                            "photos_per_trip")})
         return story_id
 
     def stories(self):

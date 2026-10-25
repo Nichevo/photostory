@@ -96,6 +96,9 @@
     <label>Reference photos of each of you <span class="hint">(optional: a folder with one subfolder per person, such as Alex and Sam, holding 5 to 10 clear photos of just that person)</span></label>
     <div class="pathrow"><input type="text" id="people_dir" placeholder="/Users/you/PhotoStory/people"><button data-browse="people_dir">Browse…</button></div>
 
+    <label>Google Maps Timeline <span class="hint">(optional: your exported Timeline.json, or Records.json / the Semantic Location History folder from Google Takeout; one per line for several phones. Used for photos that have no location of their own.)</span></label>
+    <textarea id="timeline" placeholder="D:\Dropbox\Timeline.json"></textarea>
+
     <div class="row">
       <div><label>From <span class="hint">(leave both dates blank to look through every photo)</span></label><input type="date" id="date_from"></div>
       <div><label>To</label><input type="date" id="date_to"></div>
@@ -179,7 +182,7 @@
 
 <script>
 const $ = (id) => document.getElementById(id);
-const FIELDS = ["photos", "people_dir", "date_from", "date_to", "home", "min_km", "min_nights", "photos_per_trip"];
+const FIELDS = ["photos", "people_dir", "timeline", "date_from", "date_to", "home", "min_km", "min_nights", "photos_per_trip"];
 let project = null;
 let saveTimer = null;
 
