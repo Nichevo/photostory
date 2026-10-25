@@ -150,6 +150,10 @@ class App:
                 t["selected"] = [s for s in e["selected"] if s in paths]
             if "events" in e:
                 t["events"] = {k: v.strip()[:80] for k, v in e["events"].items() if k in paths and v.strip()}
+            if "captions" in e:
+                t["captions"] = {k: v.strip()[:100] for k, v in e["captions"].items() if k in paths and v.strip()}
+            if "stars" in e:
+                t["stars"] = [s for s in e["stars"] if s in paths]
             t["edited"] = True
         pipeline.save_project(self.out_dir, proj)
         return proj
@@ -306,6 +310,11 @@ def make_handler(app):
                         return self.send(404, {"error": "No such story"})
                     app.open_story(os.path.basename(sid))
                     return self.send(200, {"story": app.current})
+                if u.path == "/api/write":
+                    app.save_edits(data.get("edits", {}))
+                    out, ids, over = app.out_dir, data.get("ids", []), bool(data.get("overwrite"))
+                    ok = app.start_job(lambda: pipeline.write_stories(out, ids, over, app._progress))
+                    return self.send(200 if ok else 409, app.job)
                 if u.path == "/api/face":
                     ok = pipeline.name_face(app.out_dir, app.cache_dir, data["path"], data["box"], data.get("name"))
                     return self.send(200 if ok else 400, {"ok": ok, "project": app.project()})

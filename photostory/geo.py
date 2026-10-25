@@ -92,3 +92,32 @@ def place_label(p, with_country=True, with_region=True):
         if part and not any(part.lower() in q.lower() or q.lower() in part.lower() for q in parts):
             parts.append(part)
     return ", ".join(parts)
+
+
+def detail(lat, lon):
+    """What's at a point, at street level: {"poi", "area", "city", "region", "country"}.
+    poi is a named place such as a park, museum or restaurant, when there is one."""
+    key = f"d{lat:.3f},{lon:.3f}"
+    with _lock:
+        cache = _load_cache()
+        if key in cache:
+            return cache[key]
+        try:
+            q = urllib.parse.urlencode({"format": "jsonv2", "lat": f"{lat:.5f}", "lon": f"{lon:.5f}",
+                                        "zoom": 18, "accept-language": "en"})
+            data = _get("https://nominatim.openstreetmap.org/reverse?" + q)
+        except Exception:
+            return {}
+        addr = data.get("address", {})
+        poi = ""
+        if data.get("name") and data.get("category") in ("tourism", "amenity", "leisure", "historic", "natural",
+                                                           "building", "shop", "railway", "aeroway", "place"):
+            poi = data["name"]
+        result = {"poi": poi,
+                  "area": addr.get("neighbourhood") or addr.get("quarter") or addr.get("suburb")
+                          or addr.get("city_district") or "",
+                  "city": addr.get("city") or addr.get("town") or addr.get("village") or addr.get("municipality") or "",
+                  "region": addr.get("state") or "", "country": addr.get("country") or ""}
+        cache[key] = result
+        save_json(_CACHE_PATH, cache)
+        return result

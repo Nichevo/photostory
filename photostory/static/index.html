@@ -45,6 +45,8 @@
   .ph.event { border-color: #d4a017; box-shadow: 0 0 0 2px #f5d77a; }
   .ph.event .num { background: #d4a017; }
   .item { width: 150px; }
+  .starbtn { width: 100%; margin-top: 4px; font-size: 12px; padding: 3px 6px; }
+  .starbtn.on { background: #fff6d6; border-color: #d4a017; font-weight: 600; }
   .item .event-in { margin-top: 4px; padding: 4px 6px; font-size: 12px; }
   .ph .tag { position:absolute; left:4px; bottom:4px; background:rgba(0,0,0,.65); color:#fff; font-size:11px; padding:1px 6px; border-radius:4px; }
   .ph .tag.both { background: var(--ok); }
@@ -133,7 +135,9 @@
       <h2>3. Check the photos</h2>
       <label>Document title</label>
       <input type="text" id="doc_title" placeholder="Travelling together: Alex & Sam">
-      <p class="meta">Click a photo below a trip to add it, or click a chosen photo to remove it. Green tags mark photos where both of you were recognised. To make a special moment stand out, such as getting engaged or dinner with family, type it under that photo as a highlight. Highlights get a coloured frame and label in the PDF, and are listed at the top of the trip page and on the cover.</p>
+      <p><button id="writeall">Write captions and stories for all trips</button></p>
+      <div id="progress-slot2"></div>
+      <p class="meta">Click a photo below a trip to add it, or click a chosen photo to remove it. Green tags mark photos where both of you were recognised. Give a photo a caption, and click Make highlight for special moments such as getting engaged or dinner with family. Highlights get a coloured frame and label in the PDF, and are listed at the top of the trip page and on the cover.</p>
     </div>
     <div class="card hidden" id="facecard">
       <h2>Help me recognise you</h2>
@@ -330,6 +334,14 @@ function renderCards() {
   project.trips.forEach((t, i) => { if (t.include && t.analysed) $("trips").appendChild(tripCard(t, i)); });
 }
 
+async function writeStories(ids, el) {
+  const hasNotes = project.trips.some(t => ids.includes(t.id) && (t.notes || "").trim());
+  const overwrite = hasNotes && confirm("Replace the story you've already written? Click Cancel to keep it and only add captions.");
+  clearTimeout(saveTimer);
+  try { $("progress-slot2").appendChild($("progress")); await api("/api/write", {ids, overwrite, edits: edits()}); poll(); }
+  catch (e) { alert(e.message); }
+}
+
 $("choose").onclick = async () => {
   clearTimeout(saveTimer);
   $("chooseerr").classList.add("hidden");
@@ -359,13 +371,15 @@ function tripCard(t, i) {
     <div class="strip chosen"></div>
     <div class="section-label">Other photos from this trip <button class="more" style="margin-left:8px;font-size:12px;padding:2px 8px">All, in time order</button></div>
     <div class="strip cands"></div>
-    <label>Notes for this page <span class="hint">(optional, e.g. "Sam's sister's wedding")</span></label>
+    <div class="h2row" style="margin-top:12px"><label style="margin:0">Story for this page <span class="hint">(optional; write your own, or let PhotoStory draft one from where your photos were taken)</span></label>
+      <button class="write" style="font-size:12px;padding:3px 10px">Write captions and story</button></div>
     <textarea class="notes-in">${esc(t.notes || "")}</textarea>`;
   el.querySelector(".title").oninput = (e) => {
     t.title = e.target.value; save();
     $("triptable").querySelectorAll("tbody tr")[i].children[1].textContent = t.title;
   };
   el.querySelector(".notes-in").oninput = (e) => { t.notes = e.target.value; save(); };
+  el.querySelector(".write").onclick = () => writeStories([t.id], el);
   let showAll = false, limit = 24;
   el.querySelector(".more").onclick = (e) => { showAll = !showAll; e.target.textContent = showAll ? "Best first" : "All, in time order"; limit = 24; render(); };
 
@@ -373,26 +387,39 @@ function tripCard(t, i) {
     const byPath = Object.fromEntries(t.photos.map(p => [p.path, p]));
     const chosen = el.querySelector(".chosen");
     chosen.innerHTML = "";
-    t.events = t.events || {};
+    t.captions = t.captions || {}; t.stars = t.stars || [];
+    // Highlights used to be typed into one box; they're now a caption plus a star.
+    Object.entries(t.events || {}).forEach(([k, v]) => {
+      if (v && v.trim()) { if (!t.stars.includes(k)) t.stars.push(k); if (!t.captions[k]) t.captions[k] = v; }
+    });
+    t.events = {};
     t.selected.forEach((path, k) => {
       const ph = byPath[path]; if (!ph) return;
       const item = document.createElement("div");
       item.className = "item";
       const d = document.createElement("div");
       d.title = "Click to remove";
+      const star = document.createElement("button");
+      star.className = "starbtn";
       const paint = () => {
-        const ev = (t.events[path] || "").trim();
-        d.className = "ph sel" + (ev ? " event" : "");
-        d.innerHTML = `<img loading="lazy" src="${thumb(path)}"><span class="num">${ev ? "★" : k + 1}</span>${tag(ph)}`;
+        const on = t.stars.includes(path);
+        d.className = "ph sel" + (on ? " event" : "");
+        d.innerHTML = `<img loading="lazy" src="${thumb(path)}"><span class="num">${on ? "★" : k + 1}</span>${tag(ph)}`;
+        star.textContent = on ? "★ Highlight" : "☆ Make highlight";
+        star.classList.toggle("on", on);
       };
       paint();
-      d.onclick = () => { t.selected.splice(k, 1); delete t.events[path]; save(); render(); };
+      d.onclick = () => { t.selected.splice(k, 1); t.stars = t.stars.filter(x => x !== path); save(); render(); };
+      star.onclick = () => {
+        t.stars = t.stars.includes(path) ? t.stars.filter(x => x !== path) : [...t.stars, path];
+        paint(); save();
+      };
       const input = document.createElement("input");
-      input.type = "text"; input.className = "event-in"; input.maxLength = 80;
-      input.placeholder = "★ Add highlight";
-      input.value = t.events[path] || "";
-      input.oninput = () => { t.events[path] = input.value; paint(); save(); };
-      item.append(d, input);
+      input.type = "text"; input.className = "event-in"; input.maxLength = 100;
+      input.placeholder = "Caption, e.g. Got engaged";
+      input.value = t.captions[path] || "";
+      input.oninput = () => { t.captions[path] = input.value; save(); };
+      item.append(d, input, star);
       chosen.appendChild(item);
     });
     if (!t.selected.length) chosen.innerHTML = `<p class="meta">No photos chosen. Click photos below to add them.</p>`;
@@ -424,7 +451,8 @@ function tripCard(t, i) {
 function edits() {
   return {title: $("doc_title").value, trips: project.trips.map(t => ({id: t.id, title: t.title, notes: t.notes, include: t.include,
     // Until photos are chosen for a trip, its selection belongs to the server.
-    selected: t.analysed ? t.selected : undefined, events: t.analysed ? t.events : undefined}))};
+    selected: t.analysed ? t.selected : undefined, events: t.analysed ? t.events : undefined,
+    captions: t.analysed ? t.captions : undefined, stars: t.analysed ? t.stars : undefined}))};
 }
 
 function save() {
@@ -432,6 +460,7 @@ function save() {
   saveTimer = setTimeout(() => api("/api/project", edits()), 600);
 }
 $("doc_title").oninput = save;
+$("writeall").onclick = () => writeStories(project.trips.filter(t => t.include && t.analysed).map(t => t.id));
 
 $("build").onclick = async () => {
   clearTimeout(saveTimer);

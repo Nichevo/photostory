@@ -60,11 +60,16 @@ def _d(s):
     return datetime.fromisoformat(s)
 
 
+def caption(trip, p):
+    text = (trip.get("captions") or {}).get(p["path"]) or (trip.get("events") or {}).get(p["path"]) or ""
+    return text.strip()
+
+
 def events(trip):
     """Highlighted moments in a trip, e.g. "Got engaged": [(photo, label)] in time order."""
-    labels = trip.get("events") or {}
-    photos = [p for p in trip["photos"] if (labels.get(p["path"]) or "").strip()]
-    return [(p, labels[p["path"]].strip()) for p in sorted(photos, key=lambda p: p["time"])]
+    starred = set(trip.get("stars") or []) | {k for k, v in (trip.get("events") or {}).items() if v.strip()}
+    photos = sorted((p for p in trip["photos"] if p["path"] in starred), key=lambda p: p["time"])
+    return [(p, caption(trip, p) or _place(trip, p) or "Highlight") for p in photos]
 
 
 def _place(trip, p):
@@ -300,9 +305,9 @@ class Report:
         y -= math.ceil(len(shown) / 2) * 14 + 4
 
         if t.get("notes"):
-            for line in self.wrap(t["notes"], 9.5, PAGE_W - 2 * M)[:4]:
-                self.text(M, y, line, 9.5)
-                y -= 13
+            for line in self.wrap(t["notes"], 9, PAGE_W - 2 * M)[:8]:
+                self.text(M, y, line, 9)
+                y -= 12
             y -= 4
 
         # Photos: four on the trip's page, then more pages of six if more were chosen
@@ -327,7 +332,8 @@ class Report:
         n = len(photos)
         cols = cols or (1 if n == 1 else 2 if n <= 4 else 3)
         rows = math.ceil(n / cols)
-        gap, cap = 10, 22
+        gap = 10
+        cap = 31 if any(caption(trip, p) for p in photos) else 22
         cw = (w - gap * (cols - 1)) / cols
         ch = (h - gap * (rows - 1)) / rows
         for k, p in enumerate(photos):
@@ -360,9 +366,14 @@ class Report:
             when = _d(p["time"])
             place = _place(trip, p)
             line1 = f"{fmt_day(when.date())}, {when.strftime('%H:%M')}" + (f"  ·  {place}" if place else "")
-            self.text(ix, iy - 10, self.fit(line1, 8, max(iw, 120)), 8)
+            ty = iy - 10
+            text = caption(trip, p)
+            if text and p["path"] not in labels:
+                self.text(ix, ty, self.fit(text, 9, max(iw, 120), bold=True), 9, bold=True)
+                ty -= 10
+            self.text(ix, ty, self.fit(line1, 8, max(iw, 120)), 8)
             src = os.path.basename(p["path"]) + (f"  ·  {p['camera']}" if p.get("camera") else "")
-            self.text(ix, iy - 19, self.fit(src, 6.5, max(iw, 120)), 6.5, color=MUTED)
+            self.text(ix, ty - 9, self.fit(src, 6.5, max(iw, 120)), 6.5, color=MUTED)
 
 
 def build_pdf(project, out_path):

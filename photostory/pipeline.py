@@ -128,7 +128,7 @@ def _resplit(t, splits):
     return parts
 
 
-EDIT_KEYS = ("title", "notes", "include", "selected", "events", "map_view", "edited")
+EDIT_KEYS = ("title", "notes", "include", "selected", "events", "captions", "stars", "map_view", "edited")
 
 
 def carry_over(old, found):
@@ -147,6 +147,8 @@ def carry_over(old, found):
             t["include"] = best.get("include", True)
         t["selected"] = [s for s in t.get("selected", []) if s in paths]
         t["events"] = {k: v for k, v in (t.get("events") or {}).items() if k in paths}
+        t["captions"] = {k: v for k, v in (t.get("captions") or {}).items() if k in paths}
+        t["stars"] = [s for s in t.get("stars", []) if s in paths]
         # Reuse photo scores so photos don't need choosing again.
         scored = {p["path"]: p for p in best.get("photos", []) if p.get("score", -1) >= 0}
         for p in t["photos"]:
@@ -172,6 +174,8 @@ def split(out_dir, trip_id):
             p.update(include=t.get("include", True), notes="", analysed=t.get("analysed", False), edited=True,
                      selected=[s for s in t.get("selected", []) if s in paths],
                      events={k: v for k, v in (t.get("events") or {}).items() if k in paths},
+                     captions={k: v for k, v in (t.get("captions") or {}).items() if k in paths},
+                     stars=[s for s in t.get("stars", []) if s in paths],
                      parts=len(trips.segments(p)))
         project.setdefault("split_parents", {})[trip_id] = t
         project.setdefault("splits", []).append([t["start"], t["end"]])
@@ -199,6 +203,8 @@ def merge(out_dir, parent_id):
                       analysed=all(c.get("analysed") for c in children), edited=True,
                       selected=[s for c in children for s in c.get("selected", [])],
                       events={k: v for c in children for k, v in (c.get("events") or {}).items()},
+                      captions={k: v for c in children for k, v in (c.get("captions") or {}).items()},
+                      stars=[s for c in children for s in c.get("stars", [])],
                       notes="\n".join(c["notes"] for c in children if c.get("notes")))
         project["trips"][idx[0]:idx[-1] + 1] = [parent]
         project["splits"] = [s for s in project.get("splits", []) if s != [parent["start"], parent["end"]]]
@@ -297,3 +303,28 @@ def recheck_faces(out_dir, cache_dir):
             if t.get("analysed"):
                 select.rescore(t, matcher, store)
         save_project(out_dir, project)
+
+
+def write_stories(out_dir, trip_ids, overwrite, progress=lambda pct, msg: None):
+    """Suggest captions for chosen photos and a story for each trip, from where photos were taken."""
+    from . import story
+
+    project = load_project(out_dir)
+    todo = [t for t in project["trips"] if t["id"] in trip_ids]
+    for i, t in enumerate(todo):
+        def step(done, total, i=i, t=t):
+            progress(int(100 * (i + done / max(total, 1)) / len(todo)), f"Looking up places for {t['title']}")
+
+        text = story.suggest(t, step)
+        with LOCK:
+            latest = load_project(out_dir)
+            for lt in latest["trips"]:
+                if lt["id"] == t["id"]:
+                    caps = lt.setdefault("captions", {})
+                    for k, v in t.get("captions", {}).items():
+                        caps.setdefault(k, v)
+                    if overwrite or not (lt.get("notes") or "").strip():
+                        lt["notes"] = text
+                    lt["edited"] = True
+            save_project(out_dir, latest)
+    progress(100, "Done")
