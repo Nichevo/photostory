@@ -42,7 +42,8 @@ def main():
                 print(f"[{pct:3d}%] {msg}")
                 last[0] = msg
 
-        proj = pipeline.run(settings, args.out, show)
+        pipeline.run(settings, args.out, show)
+        proj = pipeline.choose_photos(args.out, show)
         for n in proj["notes"]:
             print("Note:", n)
         for i, t in enumerate(proj["trips"], 1):

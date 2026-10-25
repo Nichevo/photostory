@@ -44,6 +44,12 @@
   .sticky { position: sticky; bottom: 0; background: var(--bg); padding: 12px 0; border-top: 1px solid var(--line); display:flex; gap:12px; align-items:center; flex-wrap:wrap; }
   .hidden { display:none !important; }
   a { color: var(--accent); }
+  .tablewrap { overflow-x: auto; }
+  table { width: 100%; border-collapse: collapse; font-size: 14px; }
+  th { text-align: left; font-size: 12px; color: var(--muted); font-weight: 600; border-bottom: 1px solid var(--line); padding: 6px 8px; }
+  td { padding: 7px 8px; border-bottom: 1px solid #eef1f4; vertical-align: top; }
+  tr.off td { color: var(--muted); }
+  td input[type=checkbox] { width: 18px; height: 18px; }
 </style>
 </head>
 <body>
@@ -60,7 +66,7 @@
     <div class="pathrow"><input type="text" id="people_dir" placeholder="/Users/you/PhotoStory/people"><button data-browse="people_dir">Browse…</button></div>
 
     <div class="row">
-      <div><label>From</label><input type="date" id="date_from"></div>
+      <div><label>From <span class="hint">(leave both dates blank to look through every photo)</span></label><input type="date" id="date_from"></div>
       <div><label>To</label><input type="date" id="date_to"></div>
     </div>
 
@@ -81,14 +87,24 @@
     <p id="scanerr" class="err hidden"></p>
   </section>
 
+  <section id="pick" class="card hidden">
+    <h2>2. Pick your trips</h2>
+    <p class="meta" id="summary"></p>
+    <ul class="notes" id="notes"></ul>
+    <p class="meta">These are the trips found from your photos' dates and locations. Tick the ones you want in the document. You can rename them in the next step.</p>
+    <p><button id="all">Tick all</button> <button id="none">Untick all</button></p>
+    <div class="tablewrap"><table id="triptable"><thead><tr><th></th><th>Trip</th><th>Dates</th><th>Nights</th><th>Places</th><th>Photos</th></tr></thead><tbody></tbody></table></div>
+    <p><button class="primary" id="choose">Choose photos for the ticked trips</button></p>
+    <div id="progress-slot"></div>
+    <p id="chooseerr" class="err hidden"></p>
+  </section>
+
   <section id="review" class="hidden">
     <div class="card">
-      <h2>2. Check the trips</h2>
-      <p class="meta" id="summary"></p>
-      <ul class="notes" id="notes"></ul>
+      <h2>3. Check the photos</h2>
       <label>Document title</label>
       <input type="text" id="doc_title" placeholder="Travelling together: Alex & Sam">
-      <p class="meta">Untick a trip to leave it out. Click a photo below a trip to add it, or click a chosen photo to remove it. Green tags mark photos where both of you were recognised.</p>
+      <p class="meta">Click a photo below a trip to add it, or click a chosen photo to remove it. Green tags mark photos where both of you were recognised.</p>
     </div>
     <div id="trips"></div>
     <div class="sticky">
@@ -118,8 +134,8 @@ const esc = (s) => String(s ?? "").replace(/[&<>"]/g, c => ({"&": "&amp;", "<": 
 async function init() {
   const st = await api("/api/state");
   for (const f of FIELDS) $(f).value = st.settings[f] ?? "";
-  if (st.job.running) poll();
   if (st.project) showProject(st.project);
+  if (st.job.running) poll();
 }
 
 document.querySelectorAll("[data-browse]").forEach(b => b.onclick = async () => {
@@ -136,34 +152,70 @@ $("scan").onclick = async () => {
   const s = {};
   for (const f of FIELDS) s[f] = $(f).value;
   $("scanerr").classList.add("hidden");
-  try { await api("/api/scan", s); poll(); }
+  try { $("setup").appendChild($("progress")); await api("/api/scan", s); poll(); }
   catch (e) { $("scanerr").textContent = e.message; $("scanerr").classList.remove("hidden"); }
 };
 
 async function poll() {
-  $("scan").disabled = true;
+  $("scan").disabled = $("choose").disabled = true;
   $("progress").classList.remove("hidden");
   const job = await api("/api/job");
   $("progress").querySelector(".bar div").style.width = job.pct + "%";
   $("msg").textContent = job.msg;
   if (job.running) return setTimeout(poll, 700);
-  $("scan").disabled = false;
+  $("scan").disabled = $("choose").disabled = false;
   if (job.error) { $("scanerr").textContent = "Something went wrong: " + job.error; $("scanerr").classList.remove("hidden"); return; }
+  $("progress").classList.add("hidden");
   const st = await api("/api/state");
   if (st.project) showProject(st.project);
 }
 
+const places = (t) => [...new Set([...t.stops].sort((a, b) => a.first.localeCompare(b.first))
+  .map(s => s.place && (s.place.city || s.place.country)).filter(Boolean))];
+const nightsText = (n) => n === 0 ? "day trip" : n + (n === 1 ? " night" : " nights");
+
 function showProject(p) {
   project = p;
-  $("review").classList.remove("hidden");
+  $("pick").classList.remove("hidden");
   $("doc_title").value = p.title || "";
   const nights = p.trips.reduce((a, t) => a + t.nights, 0);
-  $("summary").textContent = `${p.photo_total} photos in the date range. Found ${p.trips.length} trips, ${nights} nights away.` +
-    (p.people && p.people.length ? ` Looking for: ${p.people.join(" and ")}.` : " No reference photos were given, so photos were chosen by quality and spread over each trip.");
+  $("summary").textContent = `${p.photo_total} photos looked at. Found ${p.trips.length} trips, ${nights} nights away.` +
+    (p.people && p.people.length ? ` Looking for: ${p.people.join(" and ")}.` : "");
   $("notes").innerHTML = (p.notes || []).map(n => `<li>${esc(n)}</li>`).join("");
-  $("trips").innerHTML = "";
-  p.trips.forEach((t, i) => $("trips").appendChild(tripCard(t, i)));
+  const body = $("triptable").querySelector("tbody");
+  body.innerHTML = "";
+  p.trips.forEach((t, i) => {
+    const tr = document.createElement("tr");
+    tr.className = t.include ? "" : "off";
+    tr.innerHTML = `<td><input type="checkbox" ${t.include ? "checked" : ""}></td><td>${esc(t.title)}</td>
+      <td>${fmt(t.start)} to ${fmt(t.end)}</td><td>${t.nights}</td><td>${esc(places(t).join(", "))}</td><td>${t.photo_count}</td>`;
+    const box = tr.querySelector("input");
+    box.onchange = () => { t.include = box.checked; tr.className = t.include ? "" : "off"; save(); renderCards(); };
+    body.appendChild(tr);
+  });
+  renderCards();
 }
+
+function setAll(on) { project.trips.forEach(t => t.include = on); save(); showProject(project); }
+$("all").onclick = () => setAll(true);
+$("none").onclick = () => setAll(false);
+
+function renderCards() {
+  const ready = project.trips.filter(t => t.include && t.analysed);
+  const waiting = project.trips.filter(t => t.include && !t.analysed).length;
+  $("choose").textContent = waiting ? `Choose photos for ${waiting} ticked trip${waiting === 1 ? "" : "s"}` : "Photos chosen for all ticked trips";
+  $("choose").classList.toggle("primary", waiting > 0);
+  $("review").classList.toggle("hidden", !ready.length);
+  $("trips").innerHTML = "";
+  project.trips.forEach((t, i) => { if (t.include && t.analysed) $("trips").appendChild(tripCard(t, i)); });
+}
+
+$("choose").onclick = async () => {
+  clearTimeout(saveTimer);
+  $("chooseerr").classList.add("hidden");
+  try { $("progress-slot").appendChild($("progress")); await api("/api/choose", edits()); poll(); }
+  catch (e) { $("chooseerr").textContent = e.message; $("chooseerr").classList.remove("hidden"); }
+};
 
 function tag(ph) {
   if (!project.people || !project.people.length || !ph.people) return "";
@@ -174,15 +226,13 @@ function tag(ph) {
 
 function tripCard(t, i) {
   const el = document.createElement("section");
-  el.className = "card trip" + (t.include ? "" : " off");
-  const stops = [...t.stops].sort((a, b) => a.first.localeCompare(b.first))
-    .map(s => s.place && (s.place.city || s.place.country)).filter(Boolean);
+  el.className = "card trip";
+  const stops = places(t);
   el.innerHTML = `
     <div class="trip-head">
-      <input type="checkbox" ${t.include ? "checked" : ""} title="Include this trip">
       <div style="flex:1">
         <input type="text" class="title" value="${esc(t.title)}">
-        <p class="meta">Trip ${i + 1} · ${fmt(t.start)} to ${fmt(t.end)} · ${t.nights === 0 ? "day trip" : t.nights + (t.nights === 1 ? " night" : " nights")} · ${t.photo_count} photos${stops.length ? " · " + esc([...new Set(stops)].join(", ")) : ""}</p>
+        <p class="meta">Trip ${i + 1} · ${fmt(t.start)} to ${fmt(t.end)} · ${nightsText(t.nights)} · ${t.photo_count} photos${stops.length ? " · " + esc(stops.join(", ")) : ""}</p>
       </div>
     </div>
     <div class="section-label">Chosen for the PDF</div>
@@ -191,9 +241,10 @@ function tripCard(t, i) {
     <div class="strip cands"></div>
     <label>Notes for this page <span class="hint">(optional, e.g. "Sam's sister's wedding")</span></label>
     <textarea class="notes-in">${esc(t.notes || "")}</textarea>`;
-  const box = el.querySelector("input[type=checkbox]");
-  box.onchange = () => { t.include = box.checked; el.classList.toggle("off", !t.include); save(); };
-  el.querySelector(".title").oninput = (e) => { t.title = e.target.value; save(); };
+  el.querySelector(".title").oninput = (e) => {
+    t.title = e.target.value; save();
+    $("triptable").querySelectorAll("tbody tr")[i].children[1].textContent = t.title;
+  };
   el.querySelector(".notes-in").oninput = (e) => { t.notes = e.target.value; save(); };
   let showAll = false;
   el.querySelector(".more").onclick = (e) => { showAll = !showAll; e.target.textContent = showAll ? "Show fewer" : "Show all"; render(); };
@@ -229,7 +280,9 @@ function tripCard(t, i) {
 }
 
 function edits() {
-  return {title: $("doc_title").value, trips: project.trips.map(t => ({id: t.id, title: t.title, notes: t.notes, include: t.include, selected: t.selected}))};
+  return {title: $("doc_title").value, trips: project.trips.map(t => ({id: t.id, title: t.title, notes: t.notes, include: t.include,
+    // Until photos are chosen for a trip, its selection belongs to the server.
+    selected: t.analysed ? t.selected : undefined}))};
 }
 
 function save() {

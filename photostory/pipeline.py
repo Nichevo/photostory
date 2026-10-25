@@ -1,10 +1,15 @@
 """Turn a folder of photos into a project file of trips with suggested photos."""
 import os
+import threading
 from datetime import date
 
 from . import geo, select, trips
 from .scan import scan_folder
 from .util import load_json, save_json
+
+
+# Held while reading-changing-writing the project file, since photo picking and the user's edits overlap.
+LOCK = threading.RLock()
 
 
 def project_path(out_dir):
@@ -56,25 +61,11 @@ def run(settings, out_dir, progress=lambda pct, msg: None):
     for t in found:
         trips.name_places(t)
 
-    matcher = None
-    people = []
-    if settings.get("people_dir"):
-        progress(48, "Learning faces from your reference photos")
-        from .faces import FaceMatcher
-
-        matcher = FaceMatcher(settings["people_dir"])
-        people = sorted(matcher.people)
-        notes.extend(matcher.reference_problems)
-
-    for i, t in enumerate(found):
-        def trip_progress(done, total, i=i):
-            pct = 50 + 48 * (i + done / max(total, 1)) / max(len(found), 1)
-            progress(int(pct), f"Choosing photos for trip {i + 1} of {len(found)}: {t['title']}")
-
-        select.analyse_trip(t, matcher, os.path.join(cache_dir, "faces.json"), trip_progress)
-        select.pick(t, int(settings.get("photos_per_trip", 4)))
+    for t in found:
         t["include"] = True
         t["notes"] = ""
+        t["selected"] = []
+        t["analysed"] = False
 
     # Keep edits from an earlier run of the same trips (same start time), so re-scanning is safe.
     old = load_project(out_dir)
@@ -91,7 +82,7 @@ def run(settings, out_dir, progress=lambda pct, msg: None):
         "version": 1,
         "settings": settings,
         "title": settings.get("title") or "",
-        "people": settings.get("names") or people,
+        "people": [],
         "homes": homes,
         "notes": notes,
         "photo_total": len(photos),
@@ -100,3 +91,42 @@ def run(settings, out_dir, progress=lambda pct, msg: None):
     save_project(out_dir, project)
     progress(100, "Done")
     return project
+
+
+def choose_photos(out_dir, progress=lambda pct, msg: None):
+    """Score photos and pick a few for every ticked trip that hasn't been done yet."""
+    project = load_project(out_dir)
+    settings = project["settings"]
+    cache_dir = os.path.join(out_dir, "cache")
+    todo = [t for t in project["trips"] if t.get("include", True) and not t.get("analysed")]
+
+    matcher = None
+    if settings.get("people_dir") and todo:
+        progress(2, "Learning faces from your reference photos")
+        from .faces import FaceMatcher
+
+        matcher = FaceMatcher(settings["people_dir"])
+        project["people"] = sorted(matcher.people)
+        project["notes"] = [n for n in project.get("notes", []) if not n.startswith("No ")] + matcher.reference_problems
+
+    for i, t in enumerate(todo):
+        def trip_progress(done, total, i=i, t=t):
+            pct = 5 + 93 * (i + done / max(total, 1)) / len(todo)
+            progress(int(pct), f"Choosing photos for trip {i + 1} of {len(todo)}: {t['title']}")
+
+        select.analyse_trip(t, matcher, os.path.join(cache_dir, "faces.json"), trip_progress)
+        if not t.get("selected"):
+            select.pick(t, int(settings.get("photos_per_trip", 4)))
+        t["analysed"] = True
+        # Save as we go: the user may be editing other trips at the same time.
+        with LOCK:
+            latest = load_project(out_dir) or project
+            for lt in latest["trips"]:
+                if lt["id"] == t["id"]:
+                    lt["photos"], lt["analysed"] = t["photos"], True
+                    if not lt.get("selected"):
+                        lt["selected"] = t["selected"]
+            latest["people"], latest["notes"] = project["people"], project.get("notes", [])
+            save_project(out_dir, latest)
+    progress(100, "Done")
+    return load_project(out_dir)

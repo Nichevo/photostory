@@ -37,16 +37,15 @@ class App:
     def project(self):
         return pipeline.load_project(self.out_dir)
 
-    def start_scan(self, settings):
+    def start_job(self, fn):
         with self.lock:
             if self.job["running"]:
                 return False
             self.job = {"running": True, "pct": 0, "msg": "Starting", "error": ""}
-        save_json(self.settings_path, settings)
 
         def work():
             try:
-                pipeline.run(settings, self.out_dir, self._progress)
+                fn()
             except Exception as e:
                 traceback.print_exc()
                 self.job["error"] = f"{type(e).__name__}: {e}"
@@ -56,10 +55,21 @@ class App:
         threading.Thread(target=work, daemon=True).start()
         return True
 
+    def start_scan(self, settings):
+        save_json(self.settings_path, settings)
+        return self.start_job(lambda: pipeline.run(settings, self.out_dir, self._progress))
+
+    def start_choose(self):
+        return self.start_job(lambda: pipeline.choose_photos(self.out_dir, self._progress))
+
     def _progress(self, pct, msg):
         self.job["pct"], self.job["msg"] = pct, msg
 
     def save_edits(self, edits):
+        with pipeline.LOCK:
+            return self._save_edits(edits)
+
+    def _save_edits(self, edits):
         proj = self.project()
         if not proj:
             return None
@@ -181,6 +191,10 @@ def make_handler(app):
                     if s["people_dir"] and not os.path.isdir(s["people_dir"]):
                         return self.send(400, {"error": "That reference photo folder doesn't exist."})
                     ok = app.start_scan(s)
+                    return self.send(200 if ok else 409, app.job)
+                if u.path == "/api/choose":
+                    app.save_edits(data)
+                    ok = app.start_choose()
                     return self.send(200 if ok else 409, app.job)
                 if u.path == "/api/project":
                     return self.send(200, app.save_edits(data) or {})

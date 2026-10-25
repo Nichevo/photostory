@@ -19,6 +19,10 @@ These screenshots use made-up demo photos and names. In the real app the maps ar
 
 <img src="docs/screenshots/app-setup.png" width="800" alt="The setup screen: photo folder, reference photos, dates and home town">
 
+**Tick the trips you want from the ones it found**
+
+<img src="docs/screenshots/app-pick.png" width="800" alt="The list of trips found, with tick boxes, dates, nights and places">
+
 **Check each trip and swap photos** (green tags mark photos where both of you were recognised)
 
 <img src="docs/screenshots/app-review.png" width="800" alt="Reviewing a trip: the chosen photos and other photos to pick from">
@@ -46,13 +50,16 @@ These screenshots use made-up demo photos and names. In the real app the maps ar
    Use clear photos from different years and angles. The subfolder names are used as your names.
    With these, PhotoStory picks photos where both of you are recognised. Without them, it picks sharp
    photos spread across each trip and you choose.
-3. **From / To**: the date range to cover.
+3. **From / To**: the date range to cover. Leave both blank to look through every photo.
 4. **Home**: your town, e.g. `Bristol, UK`. Anything more than 50 km from home counts as a trip.
    Add a line for each place if you've lived in more than one.
 5. Click **Find trips**. The first scan of a big folder can take a while; later scans are fast.
-6. Check each trip: rename it, untick trips to leave out, click photos to add or remove them, and add
-   a note if it helps (e.g. "Sam's sister's wedding").
-7. Click **Make PDF**. PDFs are saved in the `PhotoStory` folder in your home folder.
+   You get a list of the trips it found, with dates, nights and places.
+6. Tick the trips you want, then click **Choose photos for the ticked trips**. Photos are only
+   analysed for the trips you tick, so this stays quick even if you scanned years of photos.
+7. Check each trip: rename it, click photos to add or remove them, and add a note if it helps
+   (e.g. "Sam's sister's wedding"). You can tick more trips later and choose photos for those too.
+8. Click **Make PDF**. PDFs are saved in the `PhotoStory` folder in your home folder.
 
 Your edits are kept if you run **Find trips** again with a wider date range.
 
