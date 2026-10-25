@@ -2,7 +2,6 @@
 from datetime import datetime
 
 from .images import open_upright, sharpness
-from .util import load_json, save_json
 
 MAX_ANALYSED_PER_TRIP = 800
 
@@ -14,10 +13,11 @@ def _even_sample(items, n):
     return [items[int(i * step)] for i in range(n)]
 
 
-def analyse_trip(trip, matcher, cache_path, progress=None):
-    """Fill in "score", "people" and "faces" for a sample of the trip's photos."""
-    cache = load_json(cache_path, {})
-    sig = ",".join(sorted(matcher.people)) if matcher else "-"
+def analyse_trip(trip, matcher, store, progress=None):
+    """Fill in "score", "people", "faces" and "unsure" for a sample of the trip's photos.
+
+    store is a util.Store; each photo's sharpness and face data are cached there, so naming a face
+    later only needs a quick re-score, not another look at every photo."""
     # Skip burst shots (several photos within a few seconds) so the time goes on different moments.
     distinct, last = [], None
     for p in trip["photos"]:
@@ -27,41 +27,58 @@ def analyse_trip(trip, matcher, cache_path, progress=None):
         last = t
     sample = _even_sample(distinct, MAX_ANALYSED_PER_TRIP)
     for n, p in enumerate(sample, 1):
-        key = f"{sig}|{p['path']}|{p.get('w')}x{p.get('h')}"
-        res = cache.get(key)
-        if res is None:
-            res = {"people": {}, "faces": 0, "sharp": 0.0}
-            try:
-                res["sharp"] = round(sharpness(open_upright(p["path"], 1024)), 1)
-            except Exception:
-                pass
+        key = f"v2|{p['path']}|{p.get('w')}x{p.get('h')}"
+        res = store.get(key)
+        if res is None or (matcher and not res.get("detected")):
+            res = res or {"sharp": 0.0, "faces": []}
+            if not res.get("sharp"):
+                try:
+                    res["sharp"] = round(sharpness(open_upright(p["path"], 1024)), 1)
+                except Exception:
+                    pass
             if matcher:
-                res.update(matcher.identify(p["path"]))
-            cache[key] = res
-            if n % 20 == 0:
-                save_json(cache_path, cache)
-        p["people"] = sorted(res["people"])
-        p["faces"] = res["faces"]
-        p["score"] = round(_score(p, res, matcher), 1)
+                res["faces"] = matcher.detect(p["path"])
+                res["detected"] = True
+            store.put(key, res)
+            if n % 25 == 0:
+                store.commit()
+        apply(p, res, matcher)
         if progress:
             progress(n, len(sample))
-    save_json(cache_path, cache)
+    store.commit()
     for p in trip["photos"]:
         p.setdefault("score", -1.0)
 
 
-def _score(p, res, matcher):
+def apply(p, res, matcher):
+    ident = matcher.identify(p["path"], res.get("faces", [])) if matcher else {"people": {}, "unsure": []}
+    p["people"] = sorted(ident["people"])
+    p["faces"] = len(res.get("faces", []))
+    p["unsure"] = ident["unsure"]
+    p["score"] = round(_score(p, ident["people"], res.get("sharp", 0), matcher), 1)
+
+
+def rescore(trip, matcher, store):
+    """Re-check who is in each analysed photo, e.g. after a face was named."""
+    for p in trip["photos"]:
+        if p.get("score", -1) >= 0:
+            res = store.get(f"v2|{p['path']}|{p.get('w')}x{p.get('h')}")
+            if res is not None:
+                apply(p, res, matcher)
+
+
+def _score(p, people, sharp, matcher):
     score = 0.0
     if matcher:
         wanted = len(matcher.people)
-        present = len(res["people"])
+        present = len(people)
         if wanted and present == wanted:
             score += 100
         elif present:
             score += 35 * present / max(wanted, 1)
         # Bigger faces read better on a printed page.
-        score += 20 * min(1.0, sum(res["people"].values()) * 12)
-    score += min(10.0, res.get("sharp", 0) / 60)
+        score += 20 * min(1.0, sum(people.values()) * 12)
+    score += min(10.0, sharp / 60)
     if p.get("lat") is not None:
         score += 5
     if p.get("w", 0) >= p.get("h", 0):

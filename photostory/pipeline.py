@@ -5,7 +5,7 @@ from datetime import date, datetime
 
 from . import geo, select, trips
 from .scan import scan_folder
-from .util import load_json, save_json
+from .util import Store, load_json, save_json
 
 
 # Held while reading-changing-writing the project file, since photo picking and the user's edits overlap.
@@ -238,12 +238,13 @@ def choose_photos(out_dir, progress=lambda pct, msg: None, cache_dir=None):
         project["people"] = sorted(matcher.people)
         project["notes"] = [n for n in project.get("notes", []) if not n.startswith("No ")] + matcher.reference_problems
 
+    store = Store(os.path.join(cache_dir, "photos.db"))
     for i, t in enumerate(todo):
         def trip_progress(done, total, i=i, t=t):
             pct = 5 + 93 * (i + done / max(total, 1)) / len(todo)
             progress(int(pct), f"Choosing photos for trip {i + 1} of {len(todo)}: {t['title']}")
 
-        select.analyse_trip(t, matcher, os.path.join(cache_dir, "faces.json"), trip_progress)
+        select.analyse_trip(t, matcher, store, trip_progress)
         if not t.get("selected"):
             select.pick(t, int(settings.get("photos_per_trip", 4)))
         t["analysed"] = True
@@ -259,3 +260,40 @@ def choose_photos(out_dir, progress=lambda pct, msg: None, cache_dir=None):
             save_project(out_dir, latest)
     progress(100, "Done")
     return load_project(out_dir)
+
+
+def name_face(out_dir, cache_dir, path, box, name):
+    """The user says a face PhotoStory wasn't sure about is `name` (or None: neither of you).
+    Remember it, then re-check every analysed photo with what was learned."""
+    from . import faces
+
+    store = Store(os.path.join(cache_dir, "photos.db"))
+    with LOCK:
+        project = load_project(out_dir)
+        photo = next((p for t in project["trips"] for p in t["photos"] if p["path"] == path), None)
+        res = store.get(f"v2|{path}|{photo.get('w')}x{photo.get('h')}") if photo else None
+        face = next((f for f in (res or {}).get("faces", []) if faces.box_key(path, f["box"]) == faces.box_key(path, box)), None)
+        if face is None:
+            return False
+        faces.learn(path, face, name)
+        matcher = faces.FaceMatcher(project["settings"]["people_dir"])
+        for t in project["trips"]:
+            if t.get("analysed"):
+                select.rescore(t, matcher, store)
+        save_project(out_dir, project)
+    return True
+
+
+def recheck_faces(out_dir, cache_dir):
+    """Re-check who is in each analysed photo, e.g. after adding reference photos."""
+    from .faces import FaceMatcher
+
+    store = Store(os.path.join(cache_dir, "photos.db"))
+    with LOCK:
+        project = load_project(out_dir)
+        matcher = FaceMatcher(project["settings"]["people_dir"])
+        project["people"] = sorted(matcher.people)
+        for t in project["trips"]:
+            if t.get("analysed"):
+                select.rescore(t, matcher, store)
+        save_project(out_dir, project)

@@ -37,6 +37,10 @@
   .ph { position:relative; width:150px; height:112px; border-radius:6px; overflow:hidden; cursor:pointer; background:#e6e9ec; border: 3px solid transparent; }
   .ph img { width:100%; height:100%; object-fit:cover; display:block; }
   .ph.sel { border-color: var(--accent); }
+  .faces { display:flex; flex-wrap:wrap; gap:12px; }
+  .face { width: 150px; text-align:center; font-size: 13px; }
+  .face img { width: 110px; height: 110px; object-fit: cover; border-radius: 50%; display:block; margin: 0 auto 6px; background:#e6e9ec; }
+  .face button { font-size: 12px; padding: 3px 8px; margin: 2px; }
   .loadmore { width:150px; height:112px; font-size:13px; }
   .ph.event { border-color: #d4a017; box-shadow: 0 0 0 2px #f5d77a; }
   .ph.event .num { background: #d4a017; }
@@ -130,6 +134,16 @@
       <label>Document title</label>
       <input type="text" id="doc_title" placeholder="Travelling together: Alex & Sam">
       <p class="meta">Click a photo below a trip to add it, or click a chosen photo to remove it. Green tags mark photos where both of you were recognised. To make a special moment stand out, such as getting engaged or dinner with family, type it under that photo as a highlight. Highlights get a coloured frame and label in the PDF, and are listed at the top of the trip page and on the cover.</p>
+    </div>
+    <div class="card hidden" id="facecard">
+      <h2>Help me recognise you</h2>
+      <p class="meta">I wasn't sure about these faces. Telling me who they are makes the photo choices better, and I'll remember it for next time.</p>
+      <div class="faces" id="faces"></div>
+    </div>
+    <div class="card hidden" id="refcard">
+      <p class="meta" id="refmsg"></p>
+      <button id="openpeople">Open the reference photos folder</button>
+      <button id="recheck">Check faces again</button>
     </div>
     <div id="trips"></div>
     <div class="sticky">
@@ -268,7 +282,45 @@ function setAll(on) { project.trips.forEach(t => t.include = on); save(); showPr
 $("all").onclick = () => setAll(true);
 $("none").onclick = () => setAll(false);
 
+function renderFaces() {
+  const people = project.people || [];
+  $("refcard").classList.toggle("hidden", !people.length);
+  $("refmsg").textContent = people.length ? `Recognising ${people.join(" and ")}. To improve it, add more photos of each of you to your reference folders (one folder per person), then click Check faces again.` : "";
+  const unsure = [];
+  project.trips.forEach(t => { if (t.include && t.analysed) t.photos.forEach(p => (p.unsure || []).forEach(f => unsure.push({p, f}))); });
+  unsure.sort((a, b) => b.f.sim - a.f.sim);
+  $("facecard").classList.toggle("hidden", !unsure.length || !people.length);
+  const box = $("faces");
+  box.innerHTML = "";
+  unsure.slice(0, 12).forEach(({p, f}) => {
+    const d = document.createElement("div");
+    d.className = "face";
+    d.innerHTML = `<img loading="lazy" src="/face?p=${encodeURIComponent(p.path)}&b=${f.box.join(",")}"><div>Is this ${esc(f.name)}?</div>`;
+    [...people, null].forEach(name => {
+      const b = document.createElement("button");
+      b.textContent = name === null ? "Neither" : name;
+      b.onclick = async () => {
+        d.style.opacity = .4;
+        clearTimeout(saveTimer);
+        await api("/api/project", edits());
+        const r = await api("/api/face", {path: p.path, box: f.box, name});
+        if (r.project) showProject(r.project);
+      };
+      d.appendChild(b);
+    });
+    box.appendChild(d);
+  });
+}
+
+$("openpeople").onclick = () => api("/api/open-people", {}).catch(e => alert(e.message));
+$("recheck").onclick = async () => {
+  $("recheck").disabled = true;
+  try { const r = await api("/api/recheck", {edits: edits()}); if (r.project) showProject(r.project); }
+  finally { $("recheck").disabled = false; }
+};
+
 function renderCards() {
+  renderFaces();
   const ready = project.trips.filter(t => t.include && t.analysed);
   const waiting = project.trips.filter(t => t.include && !t.analysed).length;
   $("choose").textContent = waiting ? `Choose photos for ${waiting} ticked trip${waiting === 1 ? "" : "s"}` : "Photos chosen for all ticked trips";

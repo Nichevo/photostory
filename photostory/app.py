@@ -175,10 +175,34 @@ class App:
         cached.write_bytes(data)
         return data
 
+    def face_crop(self, path, box):
+        from .faces import ANALYSE_SIDE
+
+        img = open_upright(path, ANALYSE_SIDE)
+        w, h = img.size
+        x, y, bw, bh = box
+        pad = 0.35
+        crop = img.crop((max(0, int((x - bw * pad) * w)), max(0, int((y - bh * pad) * h)),
+                         min(w, int((x + bw * (1 + pad)) * w)), min(h, int((y + bh * (1 + pad)) * h))))
+        crop.thumbnail((200, 200))
+        return jpeg_bytes(crop, 85)
+
     def pick_folder(self, start=""):
         reply = queue.Queue()
         self.dialogs.put((start, reply))
         return reply.get()
+
+
+def _open_folder(folder):
+    import subprocess
+    import sys
+
+    if sys.platform.startswith("win"):
+        os.startfile(folder)  # noqa: S606 (opens Explorer)
+    elif sys.platform == "darwin":
+        subprocess.Popen(["open", folder])
+    else:
+        subprocess.Popen(["xdg-open", folder])
 
 
 def _ask_directory(start):
@@ -236,6 +260,15 @@ def make_handler(app):
                     return self.send(200, app.thumb(path, size), "image/jpeg")
                 except Exception as e:
                     return self.send(500, {"error": str(e)})
+            if u.path == "/face":
+                path = q.get("p", [""])[0]
+                if not app.known_photo(path):
+                    return self.send(404, {"error": "unknown photo"})
+                try:
+                    return self.send(200, app.face_crop(path, [float(v) for v in q.get("b", [""])[0].split(",")]),
+                                     "image/jpeg")
+                except Exception as e:
+                    return self.send(500, {"error": str(e)})
             if u.path == "/pdf":
                 path = q.get("p", [""])[0]
                 if os.path.dirname(os.path.abspath(path)) != os.path.abspath(app.out_dir) or not path.endswith(".pdf"):
@@ -273,6 +306,19 @@ def make_handler(app):
                         return self.send(404, {"error": "No such story"})
                     app.open_story(os.path.basename(sid))
                     return self.send(200, {"story": app.current})
+                if u.path == "/api/face":
+                    ok = pipeline.name_face(app.out_dir, app.cache_dir, data["path"], data["box"], data.get("name"))
+                    return self.send(200 if ok else 400, {"ok": ok, "project": app.project()})
+                if u.path == "/api/recheck":
+                    app.save_edits(data.get("edits", {}))
+                    pipeline.recheck_faces(app.out_dir, app.cache_dir)
+                    return self.send(200, {"project": app.project()})
+                if u.path == "/api/open-people":
+                    folder = app.settings().get("people_dir")
+                    if not folder or not os.path.isdir(folder):
+                        return self.send(400, {"error": "Set the reference photos folder first."})
+                    _open_folder(folder)
+                    return self.send(200, {"ok": True})
                 if u.path in ("/api/split", "/api/merge"):
                     app.save_edits(data.get("edits", {}))
                     fn = pipeline.split if u.path.endswith("split") else pipeline.merge
