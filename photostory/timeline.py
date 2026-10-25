@@ -108,6 +108,11 @@ class Timeline:
         self._vstarts = [v[0] for v in self.visits]
         self._ptimes = [p[0] for p in self.points]
 
+    def span(self):
+        times = [v[0] for v in self.visits[:1]] + [v[1] for v in self.visits[-1:]] + \
+            [p[0] for p in self.points[:1]] + [p[0] for p in self.points[-1:]]
+        return min(times), max(times)
+
     def __len__(self):
         return len(self.visits) + len(self.points)
 

@@ -14,7 +14,7 @@ from datetime import datetime
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
-from . import maps, pipeline, report
+from . import __version__, maps, pipeline, report
 from .images import jpeg_bytes, open_upright
 from .util import load_json, save_json
 
@@ -240,7 +240,8 @@ def make_handler(app):
             self.send_response(code)
             self.send_header("Content-Type", ctype)
             self.send_header("Content-Length", str(len(body)))
-            self.send_header("Cache-Control", "no-store" if ctype == "application/json" else "max-age=3600")
+            cache = "max-age=3600" if ctype == "image/jpeg" else "no-store"
+            self.send_header("Cache-Control", cache)
             self.end_headers()
             self.wfile.write(body)
 
@@ -254,7 +255,8 @@ def make_handler(app):
             if u.path == "/":
                 return self.send(200, (STATIC / "index.html").read_bytes(), "text/html; charset=utf-8")
             if u.path == "/api/state":
-                return self.send(200, {"settings": app.settings(), "job": app.job, "project": app.project(),
+                return self.send(200, {"version": __version__, "settings": app.settings(), "job": app.job,
+                                       "project": app.project(),
                                        "out_dir": app.out_dir, "story": app.current, "stories": app.stories()})
             if u.path == "/api/job":
                 return self.send(200, app.job)
@@ -339,6 +341,11 @@ def make_handler(app):
                     out, ids, over = app.out_dir, data.get("ids", []), bool(data.get("overwrite"))
                     ok = app.start_job(lambda: pipeline.write_stories(out, ids, over, app._progress))
                     return self.send(200 if ok else 409, app.job)
+                if u.path == "/api/settings":
+                    # Remember what's typed in the settings as it's typed, not only when trips are found.
+                    s = {**app.settings(), **{k: v for k, v in data.items() if k in DEFAULTS}}
+                    save_json(app.settings_path, s)
+                    return self.send(200, {"ok": True})
                 if u.path == "/api/place":
                     app.save_edits(data.get("edits", {}))
                     ok = pipeline.set_place(app.out_dir, data["id"], data.get("text", ""))

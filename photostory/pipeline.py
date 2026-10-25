@@ -165,16 +165,22 @@ def add_timeline(photos, settings, cache_dir, notes, progress=lambda pct, msg: N
     from . import timeline
 
     progress(38, "Reading your Google Timeline")
+    for path in paths:
+        if not os.path.exists(path.strip().strip('"')):
+            notes.append(f"Couldn't find the Google Timeline file “{path.strip()}”. Check the path, including the drive letter.")
     tl = timeline.load(paths, cache_dir)
     if not len(tl):
-        notes.append("No locations were found in the Google Timeline file. Check it's the exported Timeline.json "
-                     "(or Records.json / Semantic Location History from Google Takeout).")
+        if any(os.path.exists(p.strip().strip('"')) for p in paths):
+            notes.append("No locations were found in the Google Timeline file. Check it's the exported Timeline.json "
+                         "(or Records.json / Semantic Location History from Google Takeout).")
         return 0
     zones = Counter(p["tz"] for p in photos if p.get("tz"))
+    without = sum(1 for p in photos if p["lat"] is None)
     n = timeline.fill_locations(photos, tl, zones.most_common(1)[0][0] if zones else None)
-    missing = sum(1 for p in photos if p["lat"] is None)
-    notes.append(f"Google Timeline gave a location to {n} photos without GPS"
-                 + (f"; {missing} still have none." if missing else "."))
+    first, last = tl.span()
+    notes.append(f"Google Timeline has {len(tl)} places from {first:%d %b %Y} to {last:%d %b %Y}. It gave a location "
+                 f"to {n} of the {without} photos without GPS"
+                 + (". Photos outside those dates, or when Timeline was off, can't be matched." if without - n else "."))
     return n
 
 

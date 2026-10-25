@@ -77,7 +77,8 @@
 </head>
 <body>
 <main>
-  <h1>PhotoStory</h1>
+  <p class="card err hidden" id="stale"></p>
+  <h1>PhotoStory <span class="meta" id="ver" style="font-weight:400"></span></h1>
   <p class="sub">Find the trips you took together in your photos, choose a few photos for each, and make a PDF.</p>
 
   <section class="card storybar">
@@ -186,9 +187,13 @@ const FIELDS = ["photos", "people_dir", "timeline", "date_from", "date_to", "hom
 let project = null;
 let saveTimer = null;
 
+const PAGE_VERSION = "0.4.0";  // same as photostory/__init__.py
+const RESTART = "PhotoStory has been updated but is still running the old version. Close its black window (or press Ctrl+C in it), start it again, then reload this page.";
+
 async function api(path, body) {
   const r = await fetch(path, body === undefined ? {} : {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify(body)});
   const data = await r.json().catch(() => ({}));
+  if (r.status === 404 && data.error === "not found") throw new Error(RESTART);
   if (!r.ok) throw new Error(data.error || r.statusText);
   return data;
 }
@@ -199,6 +204,8 @@ const esc = (s) => String(s ?? "").replace(/[&<>"]/g, c => ({"&": "&amp;", "<": 
 
 async function init() {
   const st = await api("/api/state");
+  $("stale").classList.toggle("hidden", st.version === PAGE_VERSION);
+  $("ver").textContent = "version " + (st.version || "old");
   for (const f of FIELDS) $(f).value = st.settings[f] ?? "";
   const sel = $("story");
   sel.innerHTML = st.stories.map(x => {
@@ -220,6 +227,17 @@ async function init() {
   if (st.job.running) poll();
 }
 
+$("stale").textContent = RESTART;
+let settingsTimer = null;
+FIELDS.forEach(f => $(f).addEventListener("input", () => {
+  clearTimeout(settingsTimer);
+  settingsTimer = setTimeout(() => {
+    const s = {};
+    for (const k of FIELDS) s[k] = $(k).value;
+    api("/api/settings", s).catch(() => {});
+  }, 700);
+}));
+
 $("togglesetup").onclick = () => $("setupbody").classList.toggle("hidden");
 $("story").onchange = async () => { await api("/api/story/open", {id: $("story").value}); init(); };
 $("newstory").onclick = async () => { await api("/api/story/new", {}); init(); };
@@ -236,7 +254,7 @@ document.querySelectorAll("[data-browse]").forEach(b => b.onclick = async () => 
   try {
     const r = await api("/api/pick-folder", {start: field.value});
     if (r.available === false) alert("A folder picker isn't available on this computer. Please paste the folder path instead.");
-    else if (r.path) field.value = r.path;
+    else if (r.path) { field.value = r.path; field.dispatchEvent(new Event("input")); }
   } finally { b.disabled = false; }
 });
 
