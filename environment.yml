@@ -1,0 +1,9 @@
+# Conda environment for PhotoStory:  conda env create -f environment.yml
+name: photostory
+channels:
+  - conda-forge
+dependencies:
+  - python=3.12
+  - pip
+  - pip:
+      - -r requirements.txt

@@ -36,6 +36,24 @@ These screenshots use made-up demo photos and names. In the real app the maps ar
    opened, right-click it, choose Open, then Open again.
 3. Your browser opens the PhotoStory page.
 
+### Or with Conda
+
+If you use Anaconda or Miniconda, you can keep everything in its own Conda environment instead.
+Open the **Anaconda Prompt**, go to the PhotoStory folder, and run this once:
+
+```
+conda env create -f environment.yml
+```
+
+Then, to start PhotoStory, double-click **start-conda.bat**, or run this in the Anaconda Prompt:
+
+```
+conda activate photostory
+python -m photostory
+```
+
+To remove it all later, run `conda env remove -n photostory` and delete the folder.
+
 ## Use it
 
 1. **Photo folder**: your Dropbox photos, e.g. `Dropbox/Camera Uploads`. Subfolders are included.
