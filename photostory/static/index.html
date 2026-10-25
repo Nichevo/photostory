@@ -55,6 +55,12 @@
   td { padding: 7px 8px; border-bottom: 1px solid #eef1f4; vertical-align: top; }
   tr.off td { color: var(--muted); }
   td input[type=checkbox] { width: 18px; height: 18px; }
+  .storybar { display:flex; gap:10px; align-items:center; flex-wrap:wrap; padding: 12px 18px; }
+  .storybar select { flex: 1 1 260px; padding: 8px; border:1px solid var(--line); border-radius:6px; font: inherit; background:#fff; }
+  .h2row { display:flex; justify-content:space-between; align-items:center; gap:10px; }
+  .h2row h2 { margin:0; }
+  td button { font-size: 12px; padding: 3px 8px; white-space: nowrap; }
+  .big { color: var(--accent); font-size: 12px; font-weight: 600; }
 </style>
 </head>
 <body>
@@ -62,8 +68,16 @@
   <h1>PhotoStory</h1>
   <p class="sub">Find the trips you took together in your photos, choose a few photos for each, and make a PDF.</p>
 
+  <section class="card storybar">
+    <b>Story</b>
+    <select id="story" title="Each story is saved, with its own trips, photos and settings"></select>
+    <button id="newstory">New story</button>
+  </section>
+
   <section class="card" id="setup">
-    <h2>1. Choose your photos</h2>
+    <div class="h2row"><h2>1. Choose your photos</h2><button id="togglesetup" class="hidden">Change settings</button></div>
+    <p class="meta hidden" id="setupsummary"></p>
+    <div id="setupbody">
     <label>Photo folder <span class="hint">(for example Dropbox › Camera Uploads; subfolders are included)</span></label>
     <div class="pathrow"><input type="text" id="photos" placeholder="/Users/you/Dropbox/Camera Uploads"><button data-browse="photos">Browse…</button></div>
 
@@ -87,7 +101,9 @@
       </div>
     </details>
 
+    <p class="meta hidden" id="refreshnote">Your trip names, ticks, chosen photos and highlights are kept when you refresh. Only refresh if you've added photos or changed the settings above.</p>
     <p><button class="primary" id="scan">Find trips</button></p>
+    </div>
     <div id="progress" class="hidden"><div class="bar"><div></div></div><div id="msg" class="meta"></div></div>
     <p id="scanerr" class="err hidden"></p>
   </section>
@@ -102,7 +118,7 @@
     </details>
     <p class="meta">These are the trips found from your photos' dates and locations. Tick the ones you want in the document. You can rename them in the next step.</p>
     <p><button id="all">Tick all</button> <button id="none">Untick all</button></p>
-    <div class="tablewrap"><table id="triptable"><thead><tr><th></th><th>Trip</th><th>Dates</th><th>Nights</th><th>Places</th><th>Photos</th></tr></thead><tbody></tbody></table></div>
+    <div class="tablewrap"><table id="triptable"><thead><tr><th></th><th>Trip</th><th>Dates</th><th>Nights</th><th>Places</th><th>Photos</th><th></th></tr></thead><tbody></tbody></table></div>
     <p><button class="primary" id="choose">Choose photos for the ticked trips</button></p>
     <div id="progress-slot"></div>
     <p id="chooseerr" class="err hidden"></p>
@@ -143,8 +159,34 @@ const esc = (s) => String(s ?? "").replace(/[&<>"]/g, c => ({"&": "&amp;", "<": 
 async function init() {
   const st = await api("/api/state");
   for (const f of FIELDS) $(f).value = st.settings[f] ?? "";
-  if (st.project) showProject(st.project);
+  const sel = $("story");
+  sel.innerHTML = st.stories.map(x => {
+    const range = x.from || x.to ? ` · ${x.from || "start"} to ${x.to || "now"}` : "";
+    const when = new Date(x.updated * 1000).toLocaleDateString(undefined, {day: "numeric", month: "short", year: "numeric"});
+    return `<option value="${esc(x.id)}">${esc(x.title || "Untitled story")} · ${x.trips} trips${esc(range)} · saved ${when}</option>`;
+  }).join("");
+  sel.value = st.story;
+  const has = !!st.project;
+  $("setupbody").classList.toggle("hidden", has);
+  $("togglesetup").classList.toggle("hidden", !has);
+  $("setupsummary").classList.toggle("hidden", !has);
+  $("refreshnote").classList.toggle("hidden", !has);
+  $("scan").textContent = has ? "Refresh trips" : "Find trips";
+  $("setupsummary").textContent = has ? `Photos from ${st.settings.photos}` +
+    (st.settings.date_from || st.settings.date_to ? `, ${st.settings.date_from || "the start"} to ${st.settings.date_to || "now"}` : ", all dates") + "." : "";
+  ["pick", "review"].forEach(id => $(id).classList.add("hidden"));
+  if (has) showProject(st.project);
   if (st.job.running) poll();
+}
+
+$("togglesetup").onclick = () => $("setupbody").classList.toggle("hidden");
+$("story").onchange = async () => { await api("/api/story/open", {id: $("story").value}); init(); };
+$("newstory").onclick = async () => { await api("/api/story/new", {}); init(); };
+
+async function splitOrMerge(path, id) {
+  clearTimeout(saveTimer);
+  const r = await api(path, {id, edits: edits()});
+  if (r.project) showProject(r.project);
 }
 
 document.querySelectorAll("[data-browse]").forEach(b => b.onclick = async () => {
@@ -175,8 +217,7 @@ async function poll() {
   $("scan").disabled = $("choose").disabled = false;
   if (job.error) { $("scanerr").textContent = "Something went wrong: " + job.error; $("scanerr").classList.remove("hidden"); return; }
   $("progress").classList.add("hidden");
-  const st = await api("/api/state");
-  if (st.project) showProject(st.project);
+  init();
 }
 
 const places = (t) => [...new Set([...t.stops].sort((a, b) => a.first.localeCompare(b.first))
@@ -199,7 +240,23 @@ function showProject(p) {
     const tr = document.createElement("tr");
     tr.className = t.include ? "" : "off";
     tr.innerHTML = `<td><input type="checkbox" ${t.include ? "checked" : ""}></td><td>${esc(t.title)}</td>
-      <td>${fmt(t.start)} to ${fmt(t.end)}</td><td>${t.nights}</td><td>${esc(places(t).join(", "))}</td><td>${t.photo_count}</td>`;
+      <td>${fmt(t.start)} to ${fmt(t.end)}</td><td>${t.nights}</td><td>${esc(places(t).join(", "))}</td><td>${t.photo_count}</td><td class="act"></td>`;
+    const act = tr.querySelector(".act");
+    if (t.parent) {
+      if (!i || p.trips[i - 1].parent !== t.parent) {
+        const b = document.createElement("button");
+        b.textContent = "Join back into one"; b.title = "Undo the split";
+        b.onclick = () => splitOrMerge("/api/merge", t.parent);
+        act.appendChild(b);
+      }
+    } else if (t.parts > 1) {
+      const b = document.createElement("button");
+      b.textContent = `Split into ${t.parts}`;
+      b.title = "Make a separate trip for each area visited";
+      b.onclick = () => splitOrMerge("/api/split", t.id);
+      if (t.photo_count >= 300 || t.parts >= 3) act.innerHTML = `<div class="big">Big trip</div>`;
+      act.appendChild(b);
+    }
     const box = tr.querySelector("input");
     box.onchange = () => { t.include = box.checked; tr.className = t.include ? "" : "off"; save(); renderCards(); };
     body.appendChild(tr);

@@ -156,3 +156,60 @@ def _join(items):
     if len(items) <= 1:
         return "".join(items)
     return ", ".join(items[:-1]) + " & " + items[-1]
+
+
+def _areas(trip, area_km=60):
+    """Group a trip's stops into areas (stops within area_km of each other): {stop index: area id}."""
+    stops = trip["stops"]
+    area = list(range(len(stops)))
+
+    def root(i):
+        while area[i] != i:
+            i = area[i]
+        return i
+
+    for i in range(len(stops)):
+        for j in range(i):
+            if geo.haversine_km((stops[i]["lat"], stops[i]["lon"]), (stops[j]["lat"], stops[j]["lon"])) < area_km:
+                area[root(i)] = root(j)
+    return {i: root(i) for i in range(len(stops))}
+
+
+def segments(trip):
+    """Split points for a trip: lists of dates, one list per run of days spent in the same area."""
+    area = _areas(trip)
+    by_day = {}
+    for p in trip["photos"]:
+        if p.get("stop") is not None and p["stop"] < len(trip["stops"]):
+            by_day.setdefault(p["time"][:10], Counter())[area[p["stop"]]] += 1
+    segs = []
+    for day in sorted(by_day):
+        a = by_day[day].most_common(1)[0][0]
+        if segs and segs[-1][0] == a:
+            segs[-1][1].append(day)
+        else:
+            segs.append((a, [day]))
+    return [days for _, days in segs]
+
+
+def split_trip(trip, stop_km=30):
+    """Split a trip into one part per area visited, in time order. Returns [] if it can't be split."""
+    segs = segments(trip)
+    if len(segs) < 2:
+        return []
+    parts = []
+    for k, days in enumerate(segs):
+        later = segs[k + 1][0] if k + 1 < len(segs) else None
+        members = [{key: v for key, v in p.items() if key != "stop"} for p in trip["photos"]
+                   if p["time"][:10] >= days[0] and (later is None or p["time"][:10] < later)]
+        gps = [p for p in members if p["lat"] is not None]
+        if not gps:
+            continue
+        start, end = _t(members[0]), _t(members[-1])
+        # Count the night before moving on to the next part as part of this one.
+        nights = (datetime.fromisoformat(later).date() - start.date()).days if later else (end.date() - start.date()).days
+        part = _describe(gps, members, start, end, nights, stop_km)
+        part["id"] = f"{trip['id']}-{k + 1}"
+        part["parent"] = trip["id"]
+        parts.append(part)
+    return parts if len(parts) > 1 else []

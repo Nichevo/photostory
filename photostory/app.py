@@ -24,12 +24,71 @@ DEFAULTS = {"photos": "", "people_dir": "", "date_from": "", "date_to": "", "hom
 
 
 class App:
+    """Each story (a set of trips for one document) has its own folder under <out>/stories.
+    Photo, face and thumbnail caches are shared by all stories, in <out>/cache."""
+
     def __init__(self, out_dir):
-        self.out_dir = out_dir
-        self.settings_path = os.path.join(out_dir, "settings.json")
+        self.root = out_dir
+        self.cache_dir = os.path.join(out_dir, "cache")
+        self.stories_dir = os.path.join(out_dir, "stories")
+        self.state_path = os.path.join(out_dir, "app.json")
         self.job = {"running": False, "pct": 0, "msg": "", "error": ""}
         self.lock = threading.Lock()
         self.dialogs = queue.Queue()  # folder pickers must run on the main thread (macOS)
+        self._migrate()
+        current = load_json(self.state_path, {}).get("current")
+        if not current or not os.path.isdir(os.path.join(self.stories_dir, current)):
+            existing = self.stories()
+            current = existing[0]["id"] if existing else self.new_story()
+        self.open_story(current)
+
+    def _migrate(self):
+        """Before stories existed, the one project lived straight in the output folder."""
+        if os.path.exists(os.path.join(self.root, "project.json")) and not os.path.isdir(self.stories_dir):
+            dest = os.path.join(self.stories_dir, "story-1")
+            os.makedirs(dest)
+            for f in os.listdir(self.root):
+                if f in ("project.json", "settings.json") or f.endswith(".pdf"):
+                    os.replace(os.path.join(self.root, f), os.path.join(dest, f))
+
+    @property
+    def out_dir(self):
+        return os.path.join(self.stories_dir, self.current)
+
+    @property
+    def settings_path(self):
+        return os.path.join(self.out_dir, "settings.json")
+
+    def open_story(self, story_id):
+        self.current = story_id
+        save_json(self.state_path, {"current": story_id})
+
+    def new_story(self):
+        os.makedirs(self.stories_dir, exist_ok=True)
+        story_id = "story-" + datetime.now().strftime("%Y%m%d-%H%M%S")
+        os.makedirs(os.path.join(self.stories_dir, story_id), exist_ok=True)
+        # Start from the last story's folders and home, which rarely change.
+        last = getattr(self, "current", None)
+        if last:
+            prev = self.settings()
+            save_json(os.path.join(self.stories_dir, story_id, "settings.json"),
+                      {k: prev[k] for k in ("photos", "people_dir", "home", "min_km", "min_nights", "photos_per_trip")})
+        return story_id
+
+    def stories(self):
+        out = []
+        if os.path.isdir(self.stories_dir):
+            for sid in os.listdir(self.stories_dir):
+                d = os.path.join(self.stories_dir, sid)
+                if not os.path.isdir(d):
+                    continue
+                proj = load_json(os.path.join(d, "project.json"), None) or {}
+                st = load_json(os.path.join(d, "settings.json"), {})
+                ts = [t for t in proj.get("trips", []) if t.get("include", True)]
+                out.append({"id": sid, "title": proj.get("title") or "", "trips": len(ts),
+                            "from": st.get("date_from", ""), "to": st.get("date_to", ""),
+                            "updated": os.path.getmtime(os.path.join(d, "project.json")) if proj else os.path.getmtime(d)})
+        return sorted(out, key=lambda s: -s["updated"])
 
     def settings(self):
         return {**DEFAULTS, **load_json(self.settings_path, {})}
@@ -57,10 +116,12 @@ class App:
 
     def start_scan(self, settings):
         save_json(self.settings_path, settings)
-        return self.start_job(lambda: pipeline.run(settings, self.out_dir, self._progress))
+        out = self.out_dir
+        return self.start_job(lambda: pipeline.run(settings, out, self._progress, self.cache_dir))
 
     def start_choose(self):
-        return self.start_job(lambda: pipeline.choose_photos(self.out_dir, self._progress))
+        out = self.out_dir
+        return self.start_job(lambda: pipeline.choose_photos(out, self._progress, self.cache_dir))
 
     def _progress(self, pct, msg):
         self.job["pct"], self.job["msg"] = pct, msg
@@ -106,7 +167,7 @@ class App:
 
     def thumb(self, path, size):
         key = hashlib.sha1(f"{path}|{size}".encode()).hexdigest()
-        cached = Path(self.out_dir, "cache", "thumbs", key + ".jpg")
+        cached = Path(self.cache_dir, "thumbs", key + ".jpg")
         if cached.exists():
             return cached.read_bytes()
         data = jpeg_bytes(open_upright(path, size), 80)
@@ -163,7 +224,7 @@ def make_handler(app):
                 return self.send(200, (STATIC / "index.html").read_bytes(), "text/html; charset=utf-8")
             if u.path == "/api/state":
                 return self.send(200, {"settings": app.settings(), "job": app.job, "project": app.project(),
-                                       "out_dir": app.out_dir})
+                                       "out_dir": app.out_dir, "story": app.current, "stories": app.stories()})
             if u.path == "/api/job":
                 return self.send(200, app.job)
             if u.path == "/thumb":
@@ -204,6 +265,19 @@ def make_handler(app):
                     app.save_edits(data)
                     out = app.build()
                     return self.send(200, {"path": out, "url": "/pdf?p=" + urllib.parse.quote(out)})
+                if u.path in ("/api/story/new", "/api/story/open"):
+                    if app.job["running"]:
+                        return self.send(409, {"error": "Please wait until the current step has finished."})
+                    sid = app.new_story() if u.path.endswith("new") else data.get("id", "")
+                    if not os.path.isdir(os.path.join(app.stories_dir, os.path.basename(sid))):
+                        return self.send(404, {"error": "No such story"})
+                    app.open_story(os.path.basename(sid))
+                    return self.send(200, {"story": app.current})
+                if u.path in ("/api/split", "/api/merge"):
+                    app.save_edits(data.get("edits", {}))
+                    fn = pipeline.split if u.path.endswith("split") else pipeline.merge
+                    ok = fn(app.out_dir, data.get("id", ""))
+                    return self.send(200 if ok else 400, {"ok": ok, "project": app.project()})
                 if u.path == "/api/pick-folder":
                     path = app.pick_folder(data.get("start", ""))
                     return self.send(200, {"path": path, "available": path is not None})

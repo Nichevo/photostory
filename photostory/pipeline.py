@@ -1,7 +1,7 @@
 """Turn a folder of photos into a project file of trips with suggested photos."""
 import os
 import threading
-from datetime import date
+from datetime import date, datetime
 
 from . import geo, select, trips
 from .scan import scan_folder
@@ -24,11 +24,12 @@ def save_project(out_dir, project):
     save_json(project_path(out_dir), project)
 
 
-def run(settings, out_dir, progress=lambda pct, msg: None):
+def run(settings, out_dir, progress=lambda pct, msg: None, cache_dir=None):
     """settings: photos, people_dir, date_from, date_to (YYYY-MM-DD), home (text, one place per line),
     min_km, max_gap_hours, min_nights, photos_per_trip, title."""
     os.makedirs(out_dir, exist_ok=True)
-    cache_dir = os.path.join(out_dir, "cache")
+    cache_dir = cache_dir or os.path.join(out_dir, "cache")
+    old = load_project(out_dir)
     d_from = date.fromisoformat(settings["date_from"]) if settings.get("date_from") else None
     d_to = date.fromisoformat(settings["date_to"]) if settings.get("date_to") else None
 
@@ -70,22 +71,24 @@ def run(settings, out_dir, progress=lambda pct, msg: None):
                      "messages), so they were left out.")
     stats["months"] = month_summary(photos, homes, found, float(settings.get("min_km", 50)))
 
+    # Trips split into parts last time are split the same way again.
+    splits = (old or {}).get("splits", [])
+    split_parents, kept = {}, []
+    for t in found:
+        parts = _resplit(t, splits)
+        if parts:
+            t.update(include=True, notes="", selected=[], analysed=False, parts=len(parts))
+            split_parents[t["id"]] = t
+        kept.extend(parts or [t])
+    found = kept
     for t in found:
         t["include"] = True
         t["notes"] = ""
         t["selected"] = []
         t["analysed"] = False
-
-    # Keep edits from an earlier run of the same trips (same start time), so re-scanning is safe.
-    old = load_project(out_dir)
+        t["parts"] = len(trips.segments(t))
     if old:
-        prev = {t["start"]: t for t in old.get("trips", [])}
-        for t in found:
-            o = prev.get(t["start"])
-            if o and o.get("edited"):
-                for k in ("title", "notes", "include", "selected", "events", "edited"):
-                    if k in o:
-                        t[k] = o[k]
+        carry_over(old, found)
 
     project = {
         "version": 1,
@@ -97,10 +100,110 @@ def run(settings, out_dir, progress=lambda pct, msg: None):
         "photo_total": len(photos),
         "stats": stats,
         "trips": found,
+        "splits": splits,
+        "split_parents": split_parents,
     }
+    if old:
+        for k in ("title", "people", "cover_note", "cover_photo", "cover_map_view"):
+            if old.get(k):
+                project[k] = old[k]
     save_project(out_dir, project)
     progress(100, "Done")
     return project
+
+
+def _overlap(a, b):
+    s, e = max(a["start"], b["start"]), min(a["end"], b["end"])
+    if s > e:
+        return 0
+    return (datetime.fromisoformat(e) - datetime.fromisoformat(s)).total_seconds() + 1
+
+
+def _resplit(t, splits):
+    if not any(_overlap(t, {"start": s, "end": e}) for s, e in splits):
+        return None
+    parts = trips.split_trip(t)
+    for p in parts:
+        trips.name_places(p)
+    return parts
+
+
+EDIT_KEYS = ("title", "notes", "include", "selected", "events", "map_view", "edited")
+
+
+def carry_over(old, found):
+    """Keep what the user did last time (names, ticks, photos, highlights) for the same trips."""
+    olds = old.get("trips", [])
+    for t in found:
+        best = max(olds, key=lambda o: _overlap(o, t), default=None)
+        if not best or not _overlap(best, t):
+            continue
+        paths = {p["path"] for p in t["photos"]}
+        if best.get("edited"):
+            for k in EDIT_KEYS:
+                if k in best:
+                    t[k] = best[k]
+        else:
+            t["include"] = best.get("include", True)
+        t["selected"] = [s for s in t.get("selected", []) if s in paths]
+        t["events"] = {k: v for k, v in (t.get("events") or {}).items() if k in paths}
+        # Reuse photo scores so photos don't need choosing again.
+        scored = {p["path"]: p for p in best.get("photos", []) if p.get("score", -1) >= 0}
+        for p in t["photos"]:
+            if p["path"] in scored:
+                for k in ("score", "people", "faces", "unsure"):
+                    if k in scored[p["path"]]:
+                        p[k] = scored[p["path"]][k]
+        t["analysed"] = bool(best.get("analysed")) and paths <= {p["path"] for p in best.get("photos", [])}
+
+
+def split(out_dir, trip_id):
+    """Replace a trip by its parts (one per area visited). Returns False if it can't be split."""
+    with LOCK:
+        project = load_project(out_dir)
+        idx = next(i for i, t in enumerate(project["trips"]) if t["id"] == trip_id)
+        t = project["trips"][idx]
+        parts = trips.split_trip(t)
+        if not parts:
+            return False
+        for p in parts:
+            trips.name_places(p)
+            paths = {ph["path"] for ph in p["photos"]}
+            p.update(include=t.get("include", True), notes="", analysed=t.get("analysed", False), edited=True,
+                     selected=[s for s in t.get("selected", []) if s in paths],
+                     events={k: v for k, v in (t.get("events") or {}).items() if k in paths},
+                     parts=len(trips.segments(p)))
+        project.setdefault("split_parents", {})[trip_id] = t
+        project.setdefault("splits", []).append([t["start"], t["end"]])
+        project["trips"][idx:idx + 1] = parts
+        save_project(out_dir, project)
+        return True
+
+
+def merge(out_dir, parent_id):
+    """Undo a split: put the whole trip back."""
+    with LOCK:
+        project = load_project(out_dir)
+        parent = project.get("split_parents", {}).pop(parent_id, None)
+        if parent is None:
+            return False
+        idx = [i for i, t in enumerate(project["trips"]) if t.get("parent") == parent_id]
+        # Keep the work done on the parts: chosen photos, highlights, notes and photo scores.
+        children = [project["trips"][i] for i in idx]
+        scored = {p["path"]: p for c in children for p in c["photos"] if p.get("score", -1) >= 0}
+        for p in parent["photos"]:
+            for k in ("score", "people", "faces", "unsure"):
+                if p["path"] in scored and k in scored[p["path"]]:
+                    p[k] = scored[p["path"]][k]
+        parent.update(include=any(c.get("include", True) for c in children),
+                      analysed=all(c.get("analysed") for c in children), edited=True,
+                      selected=[s for c in children for s in c.get("selected", [])],
+                      events={k: v for c in children for k, v in (c.get("events") or {}).items()},
+                      notes="\n".join(c["notes"] for c in children if c.get("notes")))
+        project["trips"][idx[0]:idx[-1] + 1] = [parent]
+        project["splits"] = [s for s in project.get("splits", []) if s != [parent["start"], parent["end"]]]
+        save_project(out_dir, project)
+        return True
 
 
 def month_summary(photos, homes, found, min_km):
@@ -119,11 +222,11 @@ def month_summary(photos, homes, found, min_km):
     return sorted(months.values(), key=lambda m: m["month"], reverse=True)
 
 
-def choose_photos(out_dir, progress=lambda pct, msg: None):
+def choose_photos(out_dir, progress=lambda pct, msg: None, cache_dir=None):
     """Score photos and pick a few for every ticked trip that hasn't been done yet."""
     project = load_project(out_dir)
     settings = project["settings"]
-    cache_dir = os.path.join(out_dir, "cache")
+    cache_dir = cache_dir or os.path.join(out_dir, "cache")
     todo = [t for t in project["trips"] if t.get("include", True) and not t.get("analysed")]
 
     matcher = None
