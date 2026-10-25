@@ -14,7 +14,7 @@ from datetime import datetime
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
-from . import pipeline, report
+from . import maps, pipeline, report
 from .images import jpeg_bytes, open_upright
 from .util import load_json, save_json
 
@@ -134,7 +134,7 @@ class App:
         proj = self.project()
         if not proj:
             return None
-        for k in ("title", "people", "cover_note"):
+        for k in ("title", "people", "cover_note", "cover_photo", "cover_map_view"):
             if k in edits:
                 proj[k] = edits[k]
         by_id = {t["id"]: t for t in proj["trips"]}
@@ -143,7 +143,7 @@ class App:
             if not t:
                 continue
             paths = {p["path"] for p in t["photos"]}
-            for k in ("title", "notes", "include"):
+            for k in ("title", "notes", "include", "map_view"):
                 if k in e:
                     t[k] = e[k]
             if "selected" in e:
@@ -264,6 +264,25 @@ def make_handler(app):
                     return self.send(200, app.thumb(path, size), "image/jpeg")
                 except Exception as e:
                     return self.send(500, {"error": str(e)})
+            if u.path in ("/map", "/api/mapview"):
+                proj = app.project()
+                ts = [t for t in proj["trips"] if t.get("include", True)]
+                which = q.get("trip", [""])[0]
+                if which == "cover":
+                    spec, box = report.cover_map(ts), report.COVER_MAP_BOX
+                else:
+                    t = next((t for t in proj["trips"] if t["id"] == which), None)
+                    if not t:
+                        return self.send(404, {"error": "unknown trip"})
+                    spec, box = report.trip_map(t), report.TRIP_MAP_BOX
+                if u.path == "/api/mapview":
+                    return self.send(200, {**maps.fit(spec["points"], report.map_px(box), spec["max_zoom"]),
+                                           "width": report.map_px(box)[0], "height": report.map_px(box)[1]})
+                view = None
+                if q.get("z"):
+                    view = {"zoom": int(q["z"][0]), "lat": float(q["lat"][0]), "lon": float(q["lon"][0])}
+                img = report.render_map(spec, box, view)
+                return self.send(200, jpeg_bytes(img, 85), "image/jpeg")
             if u.path == "/face":
                 path = q.get("p", [""])[0]
                 if not app.known_photo(path):

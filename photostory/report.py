@@ -155,13 +155,12 @@ class Report:
         self.text(PAGE_W - M, 18, f"Page {self.page}", 7, color=MUTED, align="right")
         self.c.showPage()
 
-    def map_image(self, points, route=None, labels=None, box=(515, 260), max_zoom=12):
-        px = (int(box[0] * 2.3), int(box[1] * 2.3))
-        return maps.render(points, size=px, route=route, labels=labels, max_zoom=max_zoom)
 
     # --- pages -----------------------------------------------------------------------------------
     def build(self):
         self.cover()
+        if len(self.trips) > 1:
+            self.mini_maps()
         for n, t in enumerate(self.trips, 1):
             self.trip_page(n, t)
         self.c.save()
@@ -185,15 +184,17 @@ class Report:
         y -= 16
 
         if self.trips:
-            pts, labels = [], []
-            for n, t in enumerate(self.trips, 1):
-                main = max(t["stops"], key=lambda s: s["count"])
-                pts.append((main["lat"], main["lon"]))
-                labels.append(n)
-            mh = 280
-            img = self.map_image(pts, labels=labels, box=(PAGE_W - 2 * M, mh), max_zoom=10)
-            self.image(img, M, y - mh, PAGE_W - 2 * M, mh, quality=90)
-            y -= mh + 26
+            hero = cover_photo(self.p, self.trips)
+            if hero:
+                try:
+                    img = crop_to(open_upright(hero["path"], 1600), COVER_PHOTO_BOX)
+                    self.image(img, M, y - COVER_PHOTO_BOX[1], *COVER_PHOTO_BOX)
+                    y -= COVER_PHOTO_BOX[1] + 8
+                except Exception:
+                    pass
+            img = render_map(cover_map(self.trips), COVER_MAP_BOX, self.p.get("cover_map_view"))
+            self.image(img, M, y - COVER_MAP_BOX[1], *COVER_MAP_BOX, quality=90)
+            y -= COVER_MAP_BOX[1] + 24
 
         # Summary table
         cols = [(M, "No."), (M + 30, "Destination"), (M + 290, "Dates"), (M + 430, "Nights"), (M + 478, "Photos")]
@@ -250,6 +251,32 @@ class Report:
             y -= 13
         self.footer()
 
+    def mini_maps(self):
+        """A page (or more) with a small map of each trip."""
+        cols, rows = 2, 3
+        gap = 16
+        cw = (PAGE_W - 2 * M - gap) / cols
+        mh = 165
+        for start in range(0, len(self.trips), cols * rows):
+            y = PAGE_H - M - 6
+            self.text(M, y, "WHERE WE WENT", 9, bold=True, color=ACCENT)
+            y -= 22
+            for k, t in enumerate(self.trips[start:start + cols * rows]):
+                n = start + k + 1
+                r, cidx = divmod(k, cols)
+                x = M + cidx * (cw + gap)
+                top = y - r * (mh + 62)
+                img = render_map(trip_map(t), (cw, mh))
+                self.image(img, x, top - mh, cw, mh, quality=88)
+                self.text(x, top - mh - 14, self.fit(f"{n}. {t.get('title', '')}", 10.5, cw, bold=True), 10.5, bold=True)
+                a, b = _d(t["start"]).date(), _d(t["end"]).date()
+                self.text(x, top - mh - 28, f"{fmt_range(a, b)}  ·  {_nights(t['nights'])}", 9, color=MUTED)
+                ev = events(t)
+                if ev:
+                    self.star(x + 4, top - mh - 39, 4, ACCENT)
+                    self.text(x + 12, top - mh - 42, self.fit(", ".join(lbl for _, lbl in ev), 9, cw - 14), 9, color=ACCENT)
+            self.footer()
+
     def trip_page(self, n, t):
         a, b = _d(t["start"]), _d(t["end"])
         y = PAGE_H - M - 6
@@ -281,11 +308,9 @@ class Report:
         stops = t["stops"]
         order = sorted(range(len(stops)), key=lambda i: stops[i]["first"])
         num = {i: k + 1 for k, i in enumerate(order)}
-        mh = 230
-        img = self.map_image([(s["lat"], s["lon"]) for s in stops], route=t.get("route"),
-                             labels=[num[i] for i in range(len(stops))], box=(PAGE_W - 2 * M, mh))
-        self.image(img, M, y - mh, PAGE_W - 2 * M, mh, quality=90)
-        y -= mh + 16
+        img = render_map(trip_map(t), TRIP_MAP_BOX, t.get("map_view"))
+        self.image(img, M, y - TRIP_MAP_BOX[1], *TRIP_MAP_BOX, quality=90)
+        y -= TRIP_MAP_BOX[1] + 16
 
         # Itinerary: the numbered stops, biggest few if there are many
         shown = [i for i in order if stops[i]["count"] >= 2 or len(stops) <= 6][:8]
@@ -374,6 +399,61 @@ class Report:
             self.text(ix, ty, self.fit(line1, 8, max(iw, 120)), 8)
             src = os.path.basename(p["path"]) + (f"  ·  {p['camera']}" if p.get("camera") else "")
             self.text(ix, ty - 9, self.fit(src, 6.5, max(iw, 120)), 6.5, color=MUTED)
+
+
+TRIP_MAP_BOX = (PAGE_W - 2 * M, 230)
+COVER_MAP_BOX = (PAGE_W - 2 * M, 200)
+COVER_PHOTO_BOX = (PAGE_W - 2 * M, 250)
+
+
+def map_px(box):
+    # Draw maps at about 170 dpi so they stay sharp in print.
+    return int(box[0] * 2.3), int(box[1] * 2.3)
+
+
+def trip_map(t):
+    stops = t["stops"]
+    order = sorted(range(len(stops)), key=lambda i: stops[i]["first"])
+    num = {i: k + 1 for k, i in enumerate(order)}
+    return {"points": [(s["lat"], s["lon"]) for s in stops], "route": t.get("route"),
+            "labels": [num[i] for i in range(len(stops))], "max_zoom": 12}
+
+
+def cover_map(trips):
+    pts = []
+    for t in trips:
+        main = max(t["stops"], key=lambda s: s["count"])
+        pts.append((main["lat"], main["lon"]))
+    return {"points": pts, "labels": list(range(1, len(trips) + 1)), "max_zoom": 10}
+
+
+def render_map(spec, box, view=None):
+    return maps.render(spec["points"], size=map_px(box), route=spec.get("route"), labels=spec.get("labels"),
+                       max_zoom=spec["max_zoom"], view=view)
+
+
+def cover_photo(project, trips):
+    """The photo for the cover: the one chosen, or the best photo of both of you."""
+    chosen = project.get("cover_photo")
+    photos = [p for t in trips for p in t["photos"] if p["path"] in set(t.get("selected", []))]
+    for p in photos:
+        if p["path"] == chosen:
+            return p
+    if not photos:
+        return None
+    return max(photos, key=lambda p: p.get("score", 0) + (10 if p.get("w", 0) >= p.get("h", 0) else 0))
+
+
+def crop_to(img, box):
+    """Crop the middle of an image to the box's shape, a little above centre where faces usually are."""
+    w, h = img.size
+    want = box[0] / box[1]
+    if w / h > want:
+        nw = int(h * want)
+        return img.crop(((w - nw) // 2, 0, (w - nw) // 2 + nw, h))
+    nh = int(w / want)
+    top = max(0, min(h - nh, int((h - nh) * 0.4)))
+    return img.crop((0, top, w, top + nh))
 
 
 def build_pdf(project, out_path):

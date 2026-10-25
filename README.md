@@ -11,9 +11,9 @@ the internet are map tiles and place names (OpenStreetMap), and the face models 
 
 These screenshots use made-up demo photos and names. In the real app the maps are OpenStreetMap street maps.
 
-| A page per trip | The cover page |
-| --- | --- |
-| <img src="docs/screenshots/pdf-trip.png" width="400" alt="A trip page with a map, the places visited, and four photos"> | <img src="docs/screenshots/pdf-cover.png" width="400" alt="The cover page with an overview map and a table of trips"> |
+| The cover page | Where you went | A page per trip |
+| --- | --- | --- |
+| <img src="docs/screenshots/pdf-cover.png" width="260" alt="The cover page with a photo, an overview map, the trips and highlights"> | <img src="docs/screenshots/pdf-maps.png" width="260" alt="A page of small maps, one per trip"> | <img src="docs/screenshots/pdf-trip.png" width="260" alt="A trip page with a map, a highlight, a short story and captioned photos"> |
 
 **Choose your photos and dates**
 
@@ -56,6 +56,10 @@ To remove it all later, run `conda env remove -n photostory` and delete the fold
 
 ## Use it
 
+PhotoStory keeps each document as a **story**. Pick one from the Story list at the top, or click
+**New story**. Everything in a story is saved as you go (trips, ticks, photos, captions, highlights,
+map areas), so you can close the app and carry on later.
+
 1. **Photo folder**: your Dropbox photos, e.g. `Dropbox/Camera Uploads`. Subfolders are included.
    If Dropbox keeps files "online-only", PhotoStory will make Dropbox download every photo it reads,
    so pick a folder that's available offline, or expect the first scan to take a while.
@@ -63,7 +67,7 @@ To remove it all later, run `conda env remove -n photostory` and delete the fold
    ```
    people/
      Alex/    5 to 10 photos with only Alex's face in them
-     Sam/   5 to 10 photos with only Sam's face in them
+     Sam/     5 to 10 photos with only Sam's face in them
    ```
    Use clear photos from different years and angles. The subfolder names are used as your names.
    With these, PhotoStory picks photos where both of you are recognised. Without them, it picks sharp
@@ -72,17 +76,24 @@ To remove it all later, run `conda env remove -n photostory` and delete the fold
 4. **Home**: your town, e.g. `Bristol, UK`. Anything more than 50 km from home counts as a trip.
    Add a line for each place if you've lived in more than one.
 5. Click **Find trips**. The first scan of a big folder can take a while; later scans are fast.
-   You get a list of the trips it found, with dates, nights and places.
-6. Tick the trips you want, then click **Choose photos for the ticked trips**. Photos are only
+   You get a list of the trips it found, with dates, nights and places. If a trip is missing, open
+   **Photos by month** to see whether those photos have locations.
+   Next time you open the story the settings are folded away; click **Refresh trips** only when you've
+   added photos or changed a setting. Your choices are kept.
+6. A trip that covers more than one area (e.g. Shanghai then Beijing) can be split with
+   **Split into N**, one trip per area, or joined back later.
+7. Tick the trips you want, then click **Choose photos for the ticked trips**. Photos are only
    analysed for the trips you tick, so this stays quick even if you scanned years of photos.
-7. Check each trip: rename it, click photos to add or remove them, and add a note if it helps
-   (e.g. "Sam's sister's wedding"). You can tick more trips later and choose photos for those too.
-   To make a special moment stand out, such as getting engaged or a dinner with family, type it in the
-   **Add highlight** box under that photo. In the PDF, highlighted photos get a coloured frame and label,
-   and the highlights are listed at the top of the trip page and on the cover page.
-8. Click **Make PDF**. PDFs are saved in the `PhotoStory` folder in your home folder.
-
-Your edits are kept if you run **Find trips** again with a wider date range.
+8. If PhotoStory isn't sure about some faces, it asks **Is this Alex?** Answer and it remembers,
+   for this and every later story. You can also add more reference photos and click
+   **Check faces again**.
+9. Check each trip: rename it, click photos to add or remove them, give photos captions, and click
+   **Make highlight** for special moments such as getting engaged or dinner with family.
+   **Write captions and story** drafts a caption for each photo and a short story of the places you
+   visited each day, from where the photos were taken. It's all editable.
+10. Open **Map: change the area shown** to zoom or move a trip's map, and **Cover page** to choose the
+   cover photo and the overview map's area.
+11. Click **Make PDF**. PDFs are saved in the story's folder under `PhotoStory/stories` in your home folder.
 
 ## How trips are worked out
 

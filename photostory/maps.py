@@ -57,10 +57,14 @@ def _font(size):
     return ImageFont.load_default()
 
 
-def render(points, size=(1200, 700), route=None, labels=None, max_zoom=12, min_zoom=2):
-    """points: [(lat, lon)]; route: list of point indices to join with a line; labels: text per point."""
+def _latlon(x, y, z):
+    n = 2 ** z * TILE
+    return math.degrees(math.atan(math.sinh(math.pi * (1 - 2 * y / n)))), x / n * 360 - 180
+
+
+def fit(points, size, max_zoom=12, min_zoom=2, pad=70):
+    """The view that shows all points: {"zoom", "lat", "lon"} (lat/lon of the centre)."""
     W, H = size
-    pad = 70
     lats = [p[0] for p in points]
     lons = [p[1] for p in points]
     zoom = min_zoom
@@ -70,8 +74,19 @@ def render(points, size=(1200, 700), route=None, labels=None, max_zoom=12, min_z
         if x1 - x0 <= W - 2 * pad and y1 - y0 <= H - 2 * pad:
             zoom = z
             break
-    cx = sum(_xy(lat, lon, zoom)[0] for lat, lon in [(min(lats), min(lons)), (max(lats), max(lons))]) / 2
-    cy = sum(_xy(lat, lon, zoom)[1] for lat, lon in [(min(lats), min(lons)), (max(lats), max(lons))]) / 2
+    x0, y1 = _xy(min(lats), min(lons), zoom)
+    x1, y0 = _xy(max(lats), max(lons), zoom)
+    lat, lon = _latlon((x0 + x1) / 2, (y0 + y1) / 2, zoom)
+    return {"zoom": zoom, "lat": lat, "lon": lon}
+
+
+def render(points, size=(1200, 700), route=None, labels=None, max_zoom=12, min_zoom=2, view=None):
+    """points: [(lat, lon)]; route: list of point indices to join with a line; labels: text per point.
+    view: {"zoom", "lat", "lon"} to show a chosen area instead of fitting all the points."""
+    W, H = size
+    view = view or fit(points, size, max_zoom, min_zoom)
+    zoom = max(1, min(17, int(view["zoom"])))
+    cx, cy = _xy(view["lat"], view["lon"], zoom)
     left, top = cx - W / 2, cy - H / 2
 
     img = Image.new("RGB", (W, H), (226, 232, 236))

@@ -17,6 +17,7 @@
   .hint { font-weight: 400; color: var(--muted); }
   input[type=text], input[type=date], input[type=number], textarea { width:100%; padding:8px 10px; border:1px solid var(--line); border-radius:6px; font:inherit; background:#fff; }
   textarea { min-height: 56px; resize: vertical; }
+  textarea.notes-in { min-height: 110px; }
   .row { display:flex; gap:10px; align-items:flex-end; flex-wrap: wrap; }
   .row > * { flex: 1 1 160px; }
   .pathrow { display:flex; gap:8px; } .pathrow input { flex:1; }
@@ -41,6 +42,11 @@
   .face { width: 150px; text-align:center; font-size: 13px; }
   .face img { width: 110px; height: 110px; object-fit: cover; border-radius: 50%; display:block; margin: 0 auto 6px; background:#e6e9ec; }
   .face button { font-size: 12px; padding: 3px 8px; margin: 2px; }
+  .mapw { margin-top: 10px; }
+  .mapw img { width: 100%; border-radius: 6px; border: 1px solid var(--line); display:block; background:#e6e9ec; }
+  .mapw .ctl { display:flex; gap:6px; flex-wrap:wrap; margin-top:6px; align-items:center; }
+  .mapw .ctl button { min-width: 34px; padding: 4px 8px; }
+  details.trip-map summary, #coverbox summary { margin-top: 10px; }
   .loadmore { width:150px; height:112px; font-size:13px; }
   .ph.event { border-color: #d4a017; box-shadow: 0 0 0 2px #f5d77a; }
   .ph.event .num { background: #d4a017; }
@@ -135,6 +141,11 @@
       <h2>3. Check the photos</h2>
       <label>Document title</label>
       <input type="text" id="doc_title" placeholder="Travelling together: Alex & Sam">
+      <details id="coverbox"><summary>Cover page: photo and map</summary>
+        <p class="meta">The cover shows one photo of you both, above a map of all your trips. Click a photo to use it on the cover.</p>
+        <div class="strip" id="coverphotos"></div>
+        <div class="mapw" id="covermap"></div>
+      </details>
       <p><button id="writeall">Write captions and stories for all trips</button></p>
       <div id="progress-slot2"></div>
       <p class="meta">Click a photo below a trip to add it, or click a chosen photo to remove it. Green tags mark photos where both of you were recognised. Give a photo a caption, and click Make highlight for special moments such as getting engaged or dinner with family. Highlights get a coloured frame and label in the PDF, and are listed at the top of the trip page and on the cover.</p>
@@ -323,8 +334,64 @@ $("recheck").onclick = async () => {
   finally { $("recheck").disabled = false; }
 };
 
+// Web Mercator, matching the maps the PDF uses.
+function toXY(lat, lon, z) {
+  const n = 256 * 2 ** z, s = Math.sin(lat * Math.PI / 180);
+  return [(lon + 180) / 360 * n, (0.5 - Math.log((1 + s) / (1 - s)) / (4 * Math.PI)) * n];
+}
+function toLL(x, y, z) {
+  const n = 256 * 2 ** z;
+  return [Math.atan(Math.sinh(Math.PI * (1 - 2 * y / n))) * 180 / Math.PI, x / n * 360 - 180];
+}
+
+async function mapWidget(box, key, getView, setView) {
+  const def = await api("/api/mapview?trip=" + encodeURIComponent(key));
+  let cur = getView() || {zoom: def.zoom, lat: def.lat, lon: def.lon};
+  box.innerHTML = `<img alt="Map preview"><div class="ctl">
+    <button data-z="-1" title="Zoom out">−</button><button data-z="1" title="Zoom in">+</button>
+    <button data-p="-1,0" title="Move left">←</button><button data-p="0,-1" title="Move up">↑</button>
+    <button data-p="0,1" title="Move down">↓</button><button data-p="1,0" title="Move right">→</button>
+    <button data-reset>Reset</button><span class="meta">This is how the map will look in the PDF.</span></div>`;
+  const img = box.querySelector("img");
+  const show = () => { img.src = `/map?trip=${encodeURIComponent(key)}&z=${cur.zoom}&lat=${cur.lat}&lon=${cur.lon}`; };
+  box.querySelectorAll("[data-z]").forEach(b => b.onclick = () => {
+    cur = {...cur, zoom: Math.max(1, Math.min(17, cur.zoom + +b.dataset.z))}; setView(cur); show();
+  });
+  box.querySelectorAll("[data-p]").forEach(b => b.onclick = () => {
+    const [dx, dy] = b.dataset.p.split(",").map(Number);
+    const [x, y] = toXY(cur.lat, cur.lon, cur.zoom);
+    const [lat, lon] = toLL(x + dx * def.width / 4, y + dy * def.height / 4, cur.zoom);
+    cur = {...cur, lat, lon}; setView(cur); show();
+  });
+  box.querySelector("[data-reset]").onclick = () => { cur = {zoom: def.zoom, lat: def.lat, lon: def.lon}; setView(null); show(); };
+  show();
+}
+
+function renderCover() {
+  const sel = [];
+  project.trips.forEach(t => { if (t.include && t.analysed) t.selected.forEach(path => {
+    const ph = t.photos.find(p => p.path === path); if (ph) sel.push(ph);
+  }); });
+  const auto = sel.slice().sort((a, b) => (b.score + (b.w >= b.h ? 10 : 0)) - (a.score + (a.w >= a.h ? 10 : 0)))[0];
+  const current = sel.find(p => p.path === project.cover_photo) || auto;
+  const strip = $("coverphotos");
+  strip.innerHTML = "";
+  sel.forEach(ph => {
+    const d = document.createElement("div");
+    d.className = "ph" + (current && ph.path === current.path ? " sel" : "");
+    d.innerHTML = `<img loading="lazy" src="${thumb(ph.path)}">` + (current && ph.path === current.path ? `<span class="tag both">Cover</span>` : "");
+    d.onclick = () => { project.cover_photo = ph.path; save(); renderCover(); };
+    strip.appendChild(d);
+  });
+}
+$("coverbox").addEventListener("toggle", () => {
+  const box = $("covermap");
+  if ($("coverbox").open && !box.dataset.ready) { box.dataset.ready = 1; mapWidget(box, "cover", () => project.cover_map_view, v => { project.cover_map_view = v; save(); }); }
+});
+
 function renderCards() {
   renderFaces();
+  renderCover();
   const ready = project.trips.filter(t => t.include && t.analysed);
   const waiting = project.trips.filter(t => t.include && !t.analysed).length;
   $("choose").textContent = waiting ? `Choose photos for ${waiting} ticked trip${waiting === 1 ? "" : "s"}` : "Photos chosen for all ticked trips";
@@ -367,6 +434,7 @@ function tripCard(t, i) {
         <p class="meta">Trip ${i + 1} · ${fmt(t.start)} to ${fmt(t.end)} · ${nightsText(t.nights)} · ${t.photo_count} photos${stops.length ? " · " + esc(stops.join(", ")) : ""}</p>
       </div>
     </div>
+    <details class="trip-map"><summary>Map: change the area shown</summary><div class="mapw"></div></details>
     <div class="section-label">Chosen for the PDF</div>
     <div class="strip chosen"></div>
     <div class="section-label">Other photos from this trip <button class="more" style="margin-left:8px;font-size:12px;padding:2px 8px">All, in time order</button></div>
@@ -380,6 +448,10 @@ function tripCard(t, i) {
   };
   el.querySelector(".notes-in").oninput = (e) => { t.notes = e.target.value; save(); };
   el.querySelector(".write").onclick = () => writeStories([t.id], el);
+  const md = el.querySelector(".trip-map");
+  md.addEventListener("toggle", () => {
+    if (md.open && !md.dataset.ready) { md.dataset.ready = 1; mapWidget(md.querySelector(".mapw"), t.id, () => t.map_view, v => { t.map_view = v; save(); }); }
+  });
   let showAll = false, limit = 24;
   el.querySelector(".more").onclick = (e) => { showAll = !showAll; e.target.textContent = showAll ? "Best first" : "All, in time order"; limit = 24; render(); };
 
@@ -449,7 +521,7 @@ function tripCard(t, i) {
 }
 
 function edits() {
-  return {title: $("doc_title").value, trips: project.trips.map(t => ({id: t.id, title: t.title, notes: t.notes, include: t.include,
+  return {title: $("doc_title").value, cover_photo: project.cover_photo || null, cover_map_view: project.cover_map_view || null, trips: project.trips.map(t => ({id: t.id, title: t.title, notes: t.notes, include: t.include, map_view: t.map_view || null,
     // Until photos are chosen for a trip, its selection belongs to the server.
     selected: t.analysed ? t.selected : undefined, events: t.analysed ? t.events : undefined,
     captions: t.analysed ? t.captions : undefined, stars: t.analysed ? t.stars : undefined}))};
