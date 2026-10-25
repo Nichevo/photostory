@@ -88,6 +88,18 @@ def run(settings, out_dir, progress=lambda pct, msg: None, cache_dir=None):
             split_parents[t["id"]] = t
         kept.extend(parts or [t])
     found = kept
+
+    # Trips the user added by hand, and places typed in for trips whose photos have no location.
+    manual = (old or {}).get("manual_trips", [])
+    places = (old or {}).get("places", [])
+    for m in manual:
+        t = trips.manual_trip(photos, m["from"], m["to"])
+        if t:
+            t["id"], t["manual"] = m["id"], True
+            found = [f for f in found if not _overlap(f, t)] + [t]
+    found.sort(key=lambda t: t["start"])
+    for t in found:
+        _apply_place(t, places)
     for t in found:
         t["include"] = True
         t["notes"] = ""
@@ -109,6 +121,8 @@ def run(settings, out_dir, progress=lambda pct, msg: None, cache_dir=None):
         "trips": found,
         "splits": splits,
         "split_parents": split_parents,
+        "manual_trips": manual,
+        "places": places,
     }
     if old:
         for k in ("title", "people", "cover_note", "cover_photo", "cover_map_view"):
@@ -117,6 +131,72 @@ def run(settings, out_dir, progress=lambda pct, msg: None, cache_dir=None):
     save_project(out_dir, project)
     progress(100, "Done")
     return project
+
+
+def _apply_place(t, places):
+    """Use a place the user typed in for this trip, if its photos have no location of their own."""
+    if t["stops"]:
+        return
+    for pl in places:
+        if _overlap(t, pl):
+            trips.manual_stop(t, pl["lat"], pl["lon"], pl["place"])
+            trips.name_places(t)
+            return
+
+
+def load_photos(settings, cache_dir):
+    """All photos in the story's date range (from the cache, so it's quick after a scan)."""
+    d_from = date.fromisoformat(settings["date_from"]) if settings.get("date_from") else None
+    d_to = date.fromisoformat(settings["date_to"]) if settings.get("date_to") else None
+    return scan_folder(settings["photos"], os.path.join(cache_dir, "scan.json"), d_from, d_to)
+
+
+def set_place(out_dir, trip_id, text):
+    """The user says where a trip was (its photos have no GPS). Returns False if the place isn't found."""
+    pt = geo.search(text)
+    if not pt:
+        return False
+    place = geo.reverse(*pt)
+    if not any(place.values()):
+        place = {"city": text.split(",")[0].strip(), "region": "", "country": ""}
+    with LOCK:
+        project = load_project(out_dir)
+        t = next(t for t in project["trips"] if t["id"] == trip_id)
+        trips.manual_stop(t, pt[0], pt[1], place)
+        if not t.get("title_edited"):
+            trips.name_places(t)
+        project["places"] = [p for p in project.get("places", []) if not _overlap(p, t)] + [
+            {"start": t["start"], "end": t["end"], "lat": pt[0], "lon": pt[1], "place": place, "text": text}]
+        save_project(out_dir, project)
+    return True
+
+
+def add_trip(out_dir, cache_dir, day_from, day_to, place_text=""):
+    """Add a trip by dates, for one PhotoStory didn't find. Returns an error message or None."""
+    with LOCK:
+        project = load_project(out_dir)
+        photos = load_photos(project["settings"], cache_dir)
+        t = trips.manual_trip(photos, day_from, day_to)
+        if not t:
+            return "There are no photos between those dates."
+        n = 1 + sum(1 for m in project.get("manual_trips", []))
+        t.update(id=f"added{n}", manual=True, include=True, notes="", selected=[], analysed=False, parts=0)
+        trips.name_places(t)
+        project.setdefault("manual_trips", []).append({"id": t["id"], "from": day_from, "to": day_to})
+        project["trips"] = sorted([x for x in project["trips"] if not _overlap(x, t)] + [t], key=lambda x: x["start"])
+        save_project(out_dir, project)
+    if place_text and not t["stops"]:
+        if not set_place(out_dir, t["id"], place_text):
+            return f"Added the trip, but couldn't find the place “{place_text}”. Type it again under the trip."
+    return None
+
+
+def remove_added_trip(out_dir, trip_id):
+    with LOCK:
+        project = load_project(out_dir)
+        project["manual_trips"] = [m for m in project.get("manual_trips", []) if m["id"] != trip_id]
+        project["trips"] = [t for t in project["trips"] if t["id"] != trip_id]
+        save_project(out_dir, project)
 
 
 def _overlap(a, b):

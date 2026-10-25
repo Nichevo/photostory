@@ -104,6 +104,12 @@ map areas), so you can close the app and carry on later.
 * Within a trip, photos within 30 km of each other are one stop. The nights at each stop are guessed from
   where the last photo of each day was taken.
 * Photos without GPS, taken during a trip, are included in that trip.
+* Photos without GPS still show a trip abroad if they were taken in another time zone than home's
+  (phones record the time zone). Type where it was under the trip, e.g. `Shanghai, China`.
+* A trip it can't find at all (no GPS and the same time zone as home) can be added by its dates
+  with **Add a trip it didn't find**.
+* If your photos have no location, turn it on in the camera: on Samsung, Camera › Settings ›
+  Location tags; on iPhone, Settings › Privacy › Location Services › Camera.
 
 ## Command line (optional)
 

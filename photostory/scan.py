@@ -85,6 +85,10 @@ def read_photo(path):
             exif = img.getexif()
             sub = exif.get_ifd(0x8769)
             dt = _parse_dt(sub.get(36867) or sub.get(36868) or exif.get(306))
+            tz = sub.get(36881) or sub.get(36880) or ""
+            if isinstance(tz, bytes):
+                tz = tz.decode(errors="ignore")
+            info["tz"] = tz.strip("\x00 ")[:6]
             info["camera"] = " ".join(str(exif.get(t, "")).strip("\x00 ") for t in (271, 272)).strip()
             if exif.get(274) in (5, 6, 7, 8):
                 info["w"], info["h"] = info["h"], info["w"]
@@ -133,7 +137,7 @@ def scan_folder(folder, cache_path, date_from=None, date_to=None, progress=None,
             st = os.stat(p)
         except OSError:
             continue
-        key = f"{st.st_size}:{int(st.st_mtime)}"
+        key = f"2:{st.st_size}:{int(st.st_mtime)}"  # bump the number when read_photo learns something new
         hit = cache.get(p)
         if hit and hit.get("key") == key:
             results.append(hit["info"])

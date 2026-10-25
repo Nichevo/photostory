@@ -143,6 +143,8 @@ class App:
             if not t:
                 continue
             paths = {p["path"] for p in t["photos"]}
+            if "title" in e and e["title"] != t.get("title"):
+                t["title_edited"] = True
             for k in ("title", "notes", "include", "map_view"):
                 if k in e:
                     t[k] = e[k]
@@ -275,6 +277,8 @@ def make_handler(app):
                     if not t:
                         return self.send(404, {"error": "unknown trip"})
                     spec, box = report.trip_map(t), report.TRIP_MAP_BOX
+                if not spec["points"]:
+                    return self.send(404, {"error": "no locations to map"})
                 if u.path == "/api/mapview":
                     return self.send(200, {**maps.fit(spec["points"], report.map_px(box), spec["max_zoom"]),
                                            "width": report.map_px(box)[0], "height": report.map_px(box)[1]})
@@ -334,6 +338,20 @@ def make_handler(app):
                     out, ids, over = app.out_dir, data.get("ids", []), bool(data.get("overwrite"))
                     ok = app.start_job(lambda: pipeline.write_stories(out, ids, over, app._progress))
                     return self.send(200 if ok else 409, app.job)
+                if u.path == "/api/place":
+                    app.save_edits(data.get("edits", {}))
+                    ok = pipeline.set_place(app.out_dir, data["id"], data.get("text", ""))
+                    if not ok:
+                        return self.send(400, {"error": f"Couldn't find “{data.get('text', '')}”. Try adding the country."})
+                    return self.send(200, {"project": app.project()})
+                if u.path == "/api/add-trip":
+                    app.save_edits(data.get("edits", {}))
+                    err = pipeline.add_trip(app.out_dir, app.cache_dir, data["from"], data["to"], data.get("place", ""))
+                    return self.send(200, {"project": app.project(), "warning": err} if not err or err.startswith("Added")
+                                     else {"error": err})
+                if u.path == "/api/remove-trip":
+                    pipeline.remove_added_trip(app.out_dir, data["id"])
+                    return self.send(200, {"project": app.project()})
                 if u.path == "/api/face":
                     ok = pipeline.name_face(app.out_dir, app.cache_dir, data["path"], data["box"], data.get("name"))
                     return self.send(200 if ok else 400, {"ok": ok, "project": app.project()})

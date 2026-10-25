@@ -19,9 +19,9 @@ def guess_home(photos):
 
 def find_trips(photos, homes, min_km=50, max_gap_hours=36, min_nights=1, min_photos=3, stop_km=30,
                same_area_km=150, same_area_gap_days=6):
-    gps = [p for p in photos if p["lat"] is not None]
     gap = timedelta(hours=max_gap_hours)
     long_gap = timedelta(days=same_area_gap_days)
+    home_tz = home_timezones(photos, homes, min_km)
 
     def continues(cur, p):
         """Does photo p carry on the trip in cur? Days without photos are normal on a trip, so a
@@ -29,15 +29,28 @@ def find_trips(photos, homes, min_km=50, max_gap_hours=36, min_nights=1, min_pho
         dt = _t(p) - _t(cur[-1])
         if dt <= gap:
             return True
-        near = geo.haversine_km((p["lat"], p["lon"]), (cur[-1]["lat"], cur[-1]["lon"])) <= same_area_km
+        q = cur[-1]
+        if p["lat"] is not None and q["lat"] is not None:
+            near = geo.haversine_km((p["lat"], p["lon"]), (q["lat"], q["lon"])) <= same_area_km
+        else:
+            near = bool(p.get("tz")) and p.get("tz") == q.get("tz")
         return near and dt <= long_gap
 
     def away(p):
-        return all(geo.haversine_km((p["lat"], p["lon"]), h) > min_km for h in homes)
+        """True if away from home, False if at home, None if we can't tell.
+        Without GPS, a photo taken in another time zone than home's must have been taken away."""
+        if p["lat"] is not None:
+            return all(geo.haversine_km((p["lat"], p["lon"]), h) > min_km for h in homes)
+        if p.get("tz") and home_tz and p["tz"] not in home_tz:
+            return True
+        return None
 
     raw, cur = [], None
-    for p in gps:
-        if away(p):
+    for p in photos:
+        where = away(p)
+        if where is None:
+            continue
+        if where:
             if cur and continues(cur, p):
                 cur.append(p)
             else:
@@ -66,10 +79,25 @@ def find_trips(photos, homes, min_km=50, max_gap_hours=36, min_nights=1, min_pho
             continue
         # Photos without GPS (e.g. edited copies, some cameras) taken during the trip belong to it too.
         members = [p for p in photos if start <= _t(p) <= end]
-        trips.append(_describe(group, members, start, end, nights, stop_km))
+        trip = _describe([p for p in group if p["lat"] is not None], members, start, end, nights, stop_km)
+        zones = Counter(p["tz"] for p in group if p.get("tz"))
+        trip["tz"] = zones.most_common(1)[0][0] if zones else ""
+        trips.append(trip)
     for i, t in enumerate(trips, 1):
         t["id"] = f"trip{i}"
     return trips
+
+
+def home_timezones(photos, homes, min_km):
+    """Time zones (e.g. "+10:00") of photos taken at home. Daylight saving gives a home two zones."""
+    at_home = Counter(p["tz"] for p in photos if p.get("tz") and p["lat"] is not None and homes
+                      and any(geo.haversine_km((p["lat"], p["lon"]), h) <= min_km for h in homes))
+    if not at_home:
+        # No photos with a location at home: assume home is the time zone most photos were taken in.
+        zones = Counter(p["tz"] for p in photos if p.get("tz"))
+        return {zones.most_common(1)[0][0]} if zones else set()
+    total = sum(at_home.values())
+    return {tz for tz, n in at_home.items() if n >= total * 0.05}
 
 
 def _describe(gps_photos, members, start, end, nights, stop_km):
@@ -143,7 +171,10 @@ def trip_title(trip):
         if p.get("country") and p["country"] not in countries:
             countries.append(p["country"])
     if not cities and not countries:
-        return "Trip " + datetime.fromisoformat(trip["start"]).strftime("%b %Y")
+        when = "Trip " + datetime.fromisoformat(trip["start"]).strftime("%b %Y")
+        if not trip["stops"] and trip.get("tz"):
+            return f"{when}, place unknown (UTC{trip['tz']})"
+        return when
     if len(countries) > 2:
         return _join(countries[:3]) + (" and more" if len(countries) > 3 else "")
     if len(countries) == 2:
@@ -213,3 +244,25 @@ def split_trip(trip, stop_km=30):
         part["parent"] = trip["id"]
         parts.append(part)
     return parts if len(parts) > 1 else []
+
+
+def manual_stop(trip, lat, lon, place):
+    """Give a trip whose photos have no location a single place the user typed in."""
+    trip["stops"] = [{"lat": lat, "lon": lon, "count": len(trip["photos"]), "first": trip["start"],
+                      "last": trip["end"], "nights": trip["nights"], "place": place}]
+    trip["route"] = [0]
+    for p in trip["photos"]:
+        p["stop"] = 0
+
+
+def manual_trip(photos, start_day, end_day, stop_km=30):
+    """A trip the user added by dates: every photo from start_day to end_day (YYYY-MM-DD)."""
+    members = [p for p in photos if start_day <= p["time"][:10] <= end_day]
+    if not members:
+        return None
+    start, end = _t(members[0]), _t(members[-1])
+    gps = [p for p in members if p["lat"] is not None]
+    trip = _describe(gps, members, start, end, (end.date() - start.date()).days, stop_km)
+    trip["tz"] = Counter(p["tz"] for p in members if p.get("tz")).most_common(1)[0][0] if any(
+        p.get("tz") for p in members) else ""
+    return trip

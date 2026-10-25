@@ -131,6 +131,15 @@
     <p class="meta">These are the trips found from your photos' dates and locations. Tick the ones you want in the document. You can rename them in the next step.</p>
     <p><button id="all">Tick all</button> <button id="none">Untick all</button></p>
     <div class="tablewrap"><table id="triptable"><thead><tr><th></th><th>Trip</th><th>Dates</th><th>Nights</th><th>Places</th><th>Photos</th><th></th></tr></thead><tbody></tbody></table></div>
+    <details id="addtrip"><summary>Add a trip it didn't find</summary>
+      <p class="meta">If a trip is missing (for example the photos have no location), add it by its dates. Every photo taken between those dates is used.</p>
+      <div class="row">
+        <div><label>First day</label><input type="date" id="add_from"></div>
+        <div><label>Last day</label><input type="date" id="add_to"></div>
+        <div><label>Where <span class="hint">(e.g. Shanghai, China)</span></label><input type="text" id="add_place"></div>
+      </div>
+      <p><button id="addbtn">Add trip</button> <span class="err" id="adderr"></span></p>
+    </details>
     <p><button class="primary" id="choose">Choose photos for the ticked trips</button></p>
     <div id="progress-slot"></div>
     <p id="chooseerr" class="err hidden"></p>
@@ -271,6 +280,24 @@ function showProject(p) {
     tr.innerHTML = `<td><input type="checkbox" ${t.include ? "checked" : ""}></td><td>${esc(t.title)}</td>
       <td>${fmt(t.start)} to ${fmt(t.end)}</td><td>${t.nights}</td><td>${esc(places(t).join(", "))}</td><td>${t.photo_count}</td><td class="act"></td>`;
     const act = tr.querySelector(".act");
+    if (!t.stops.length) {
+      // Photos without GPS: ask where the trip was.
+      const cell = tr.children[4];
+      cell.innerHTML = `<div class="meta">No location in the photos${t.tz ? " (time zone UTC" + esc(t.tz) + ")" : ""}. Where was it?</div>
+        <div class="pathrow"><input type="text" placeholder="e.g. Shanghai, China"><button>Set</button></div><div class="err"></div>`;
+      const [inp, btn] = [cell.querySelector("input"), cell.querySelector("button")];
+      btn.onclick = async () => {
+        btn.disabled = true;
+        try { clearTimeout(saveTimer); const r = await api("/api/place", {id: t.id, text: inp.value, edits: edits()}); showProject(r.project); }
+        catch (e) { cell.querySelector(".err").textContent = e.message; btn.disabled = false; }
+      };
+    }
+    if (t.manual) {
+      const b = document.createElement("button");
+      b.textContent = "Remove"; b.title = "Remove this trip you added";
+      b.onclick = async () => { const r = await api("/api/remove-trip", {id: t.id}); showProject(r.project); };
+      act.appendChild(b);
+    }
     if (t.parent) {
       if (!i || p.trips[i - 1].parent !== t.parent) {
         const b = document.createElement("button");
@@ -409,6 +436,17 @@ async function writeStories(ids, el) {
   catch (e) { alert(e.message); }
 }
 
+$("addbtn").onclick = async () => {
+  $("adderr").textContent = "";
+  if (!$("add_from").value || !$("add_to").value) { $("adderr").textContent = "Please choose both dates."; return; }
+  try {
+    clearTimeout(saveTimer);
+    const r = await api("/api/add-trip", {from: $("add_from").value, to: $("add_to").value, place: $("add_place").value, edits: edits()});
+    if (r.warning) $("adderr").textContent = r.warning;
+    showProject(r.project);
+  } catch (e) { $("adderr").textContent = e.message; }
+};
+
 $("choose").onclick = async () => {
   clearTimeout(saveTimer);
   $("chooseerr").classList.add("hidden");
@@ -449,6 +487,7 @@ function tripCard(t, i) {
   el.querySelector(".notes-in").oninput = (e) => { t.notes = e.target.value; save(); };
   el.querySelector(".write").onclick = () => writeStories([t.id], el);
   const md = el.querySelector(".trip-map");
+  if (!t.stops.length) md.classList.add("hidden");
   md.addEventListener("toggle", () => {
     if (md.open && !md.dataset.ready) { md.dataset.ready = 1; mapWidget(md.querySelector(".mapw"), t.id, () => t.map_view, v => { t.map_view = v; save(); }); }
   });

@@ -192,9 +192,11 @@ class Report:
                     y -= COVER_PHOTO_BOX[1] + 8
                 except Exception:
                     pass
-            img = render_map(cover_map(self.trips), COVER_MAP_BOX, self.p.get("cover_map_view"))
-            self.image(img, M, y - COVER_MAP_BOX[1], *COVER_MAP_BOX, quality=90)
-            y -= COVER_MAP_BOX[1] + 24
+            spec = cover_map(self.trips)
+            if spec["points"]:
+                img = render_map(spec, COVER_MAP_BOX, self.p.get("cover_map_view"))
+                self.image(img, M, y - COVER_MAP_BOX[1], *COVER_MAP_BOX, quality=90)
+                y -= COVER_MAP_BOX[1] + 24
 
         # Summary table
         cols = [(M, "No."), (M + 30, "Destination"), (M + 290, "Dates"), (M + 430, "Nights"), (M + 478, "Photos")]
@@ -266,8 +268,13 @@ class Report:
                 r, cidx = divmod(k, cols)
                 x = M + cidx * (cw + gap)
                 top = y - r * (mh + 62)
-                img = render_map(trip_map(t), (cw, mh))
-                self.image(img, x, top - mh, cw, mh, quality=88)
+                if t["stops"]:
+                    img = render_map(trip_map(t), (cw, mh))
+                    self.image(img, x, top - mh, cw, mh, quality=88)
+                else:
+                    self.c.setFillColor(TINT)
+                    self.c.rect(x, top - mh, cw, mh, stroke=0, fill=1)
+                    self.text(x + cw / 2, top - mh / 2, "No location in these photos", 9, color=MUTED, align="center")
                 self.text(x, top - mh - 14, self.fit(f"{n}. {t.get('title', '')}", 10.5, cw, bold=True), 10.5, bold=True)
                 a, b = _d(t["start"]).date(), _d(t["end"]).date()
                 self.text(x, top - mh - 28, f"{fmt_range(a, b)}  ·  {_nights(t['nights'])}", 9, color=MUTED)
@@ -308,9 +315,10 @@ class Report:
         stops = t["stops"]
         order = sorted(range(len(stops)), key=lambda i: stops[i]["first"])
         num = {i: k + 1 for k, i in enumerate(order)}
-        img = render_map(trip_map(t), TRIP_MAP_BOX, t.get("map_view"))
-        self.image(img, M, y - TRIP_MAP_BOX[1], *TRIP_MAP_BOX, quality=90)
-        y -= TRIP_MAP_BOX[1] + 16
+        if stops:
+            img = render_map(trip_map(t), TRIP_MAP_BOX, t.get("map_view"))
+            self.image(img, M, y - TRIP_MAP_BOX[1], *TRIP_MAP_BOX, quality=90)
+            y -= TRIP_MAP_BOX[1] + 16
 
         # Itinerary: the numbered stops, biggest few if there are many
         shown = [i for i in order if stops[i]["count"] >= 2 or len(stops) <= 6][:8]
@@ -420,11 +428,13 @@ def trip_map(t):
 
 
 def cover_map(trips):
-    pts = []
-    for t in trips:
-        main = max(t["stops"], key=lambda s: s["count"])
-        pts.append((main["lat"], main["lon"]))
-    return {"points": pts, "labels": list(range(1, len(trips) + 1)), "max_zoom": 10}
+    pts, labels = [], []
+    for n, t in enumerate(trips, 1):
+        if t["stops"]:
+            main = max(t["stops"], key=lambda s: s["count"])
+            pts.append((main["lat"], main["lon"]))
+            labels.append(n)
+    return {"points": pts, "labels": labels, "max_zoom": 10}
 
 
 def render_map(spec, box, view=None):
