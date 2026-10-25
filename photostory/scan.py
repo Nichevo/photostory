@@ -15,7 +15,8 @@ except ImportError:  # HEIC photos are skipped without it
 
 from .util import load_json, save_json
 
-PHOTO_EXTS = {".jpg", ".jpeg", ".heic", ".heif", ".png", ".tif", ".tiff", ".webp"}
+PHOTO_EXTS = {".jpg", ".jpeg", ".heic", ".heif", ".hif", ".avif", ".dng", ".png", ".tif", ".tiff", ".webp"}
+VIDEO_EXTS = {".mov", ".mp4", ".m4v", ".3gp", ".avi", ".mkv"}
 
 # Dropbox Camera Uploads names files like "2024-05-12 14.33.21.jpg"; phones use "IMG_20240512_143321.jpg".
 _NAME_PATTERNS = [
@@ -101,12 +102,18 @@ def read_photo(path):
     return info
 
 
-def list_photos(folder):
+def list_photos(folder, skipped=None):
+    """Photo files under folder. skipped, if given, counts the other files by extension."""
     for root, dirs, files in os.walk(folder):
         dirs[:] = [d for d in dirs if not d.startswith(".")]
         for f in files:
-            if not f.startswith(".") and os.path.splitext(f)[1].lower() in PHOTO_EXTS:
+            ext = os.path.splitext(f)[1].lower()
+            if f.startswith("."):
+                continue
+            if ext in PHOTO_EXTS:
                 yield os.path.join(root, f)
+            elif skipped is not None:
+                skipped[ext or "(none)"] = skipped.get(ext or "(none)", 0) + 1
 
 
 def scan_folder(folder, cache_path, date_from=None, date_to=None, progress=None, stats=None):
@@ -118,7 +125,8 @@ def scan_folder(folder, cache_path, date_from=None, date_to=None, progress=None,
     stats = stats if stats is not None else {}
     unreadable = []
     cache = load_json(cache_path, {})
-    paths = list(list_photos(folder))
+    skipped = {}
+    paths = list(list_photos(folder, skipped))
     todo, results = [], []
     for p in paths:
         try:
@@ -150,7 +158,7 @@ def scan_folder(folder, cache_path, date_from=None, date_to=None, progress=None,
                 save_json(cache_path, cache)
     save_json(cache_path, cache)
 
-    stats.update({"files": total, "unreadable": len(unreadable), "unreadable_examples": unreadable[:5],
+    stats.update({"files": total, "skipped": skipped, "unreadable": len(unreadable), "unreadable_examples": unreadable[:5],
                   "undated": sum(1 for i in results if not i.get("time")),
                   "heic_support": "pillow_heif" in globals()})
     out = []

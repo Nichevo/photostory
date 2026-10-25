@@ -4,7 +4,7 @@ import threading
 from datetime import date, datetime
 
 from . import geo, select, trips
-from .scan import scan_folder
+from .scan import VIDEO_EXTS, scan_folder
 from .util import Store, load_json, save_json
 
 
@@ -66,6 +66,13 @@ def run(settings, out_dir, progress=lambda pct, msg: None, cache_dir=None):
     if stats.get("unreadable"):
         notes.append(f"{stats['unreadable']} photo files couldn't be read, e.g. {stats['unreadable_examples'][0]}."
                      + ("" if stats.get("heic_support") else " HEIC support (pillow-heif) isn't installed."))
+    videos = sum(n for ext, n in stats.get("skipped", {}).items() if ext in VIDEO_EXTS)
+    others = {ext: n for ext, n in stats.get("skipped", {}).items() if ext not in VIDEO_EXTS}
+    if videos:
+        notes.append(f"{videos} videos were skipped; trips are found from photos only.")
+    if others:
+        top = ", ".join(f"{n} {ext}" for ext, n in sorted(others.items(), key=lambda kv: -kv[1])[:5])
+        notes.append(f"Other files that aren't photos were skipped: {top}.")
     if stats.get("undated"):
         notes.append(f"{stats['undated']} photos have no date in them (often screenshots or images saved from "
                      "messages), so they were left out.")
