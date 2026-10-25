@@ -74,7 +74,7 @@ def run(settings, out_dir, progress=lambda pct, msg: None):
         for t in found:
             o = prev.get(t["start"])
             if o and o.get("edited"):
-                for k in ("title", "notes", "include", "selected", "edited"):
+                for k in ("title", "notes", "include", "selected", "events", "edited"):
                     if k in o:
                         t[k] = o[k]
 

@@ -20,6 +20,7 @@ INK = HexColor("#1f2328")
 MUTED = HexColor("#6a737d")
 ACCENT = HexColor("#c8283c")
 RULE = HexColor("#d0d7de")
+TINT = HexColor("#fbecee")
 
 _FONT_CANDIDATES = [
     ("/System/Library/Fonts/Supplemental/Arial.ttf", "/System/Library/Fonts/Supplemental/Arial Bold.ttf"),
@@ -57,6 +58,19 @@ def fmt_range(a, b):
 
 def _d(s):
     return datetime.fromisoformat(s)
+
+
+def events(trip):
+    """Highlighted moments in a trip, e.g. "Got engaged": [(photo, label)] in time order."""
+    labels = trip.get("events") or {}
+    photos = [p for p in trip["photos"] if (labels.get(p["path"]) or "").strip()]
+    return [(p, labels[p["path"]].strip()) for p in sorted(photos, key=lambda p: p["time"])]
+
+
+def _place(trip, p):
+    if p.get("stop") is not None and p["stop"] < len(trip["stops"]):
+        return geo.place_label(trip["stops"][p["stop"]].get("place") or {})
+    return ""
 
 
 def _nights(n):
@@ -114,6 +128,18 @@ class Report:
         data = ImageReader(io.BytesIO(jpeg_bytes(img, quality)))
         self.c.drawImage(data, x + (w - dw) / 2, y + (h - dh) / 2, dw, dh)
         return x + (w - dw) / 2, y + (h - dh) / 2, dw, dh
+
+    def star(self, cx, cy, r, color):
+        c = self.c
+        path = c.beginPath()
+        for k in range(10):
+            a = math.pi / 2 + k * math.pi / 5
+            rr = r if k % 2 == 0 else r * 0.45
+            pt = (cx + rr * math.cos(a), cy + rr * math.sin(a))
+            path.moveTo(*pt) if k == 0 else path.lineTo(*pt)
+        path.close()
+        c.setFillColor(color)
+        c.drawPath(path, stroke=0, fill=1)
 
     def footer(self):
         self.page += 1
@@ -188,6 +214,25 @@ class Report:
             self.text(cols[4][0], y, str(t["photo_count"]), 9)
             y -= row_h
 
+        highlights = [(n, ph, label) for n, t in enumerate(self.trips, 1) for ph, label in events(t)]
+        if highlights:
+            y -= 12
+            if y < 90:
+                self.footer()
+                y = PAGE_H - M - 10
+            self.text(M, y, "HIGHLIGHTS", 8, bold=True, color=ACCENT)
+            y -= 16
+            for n, ph, label in highlights:
+                if y < 60:
+                    self.footer()
+                    y = PAGE_H - M - 10
+                self.star(M + 4, y + 3, 4.5, ACCENT)
+                self.text(M + 14, y, self.fit(label, 9, 250, bold=True), 9, bold=True)
+                where = _place(self.trips[n - 1], ph)
+                self.text(M + 290, y, self.fit(f"{fmt_day(_d(ph['time']).date())}  ·  Trip {n}"
+                                              + (f"  ·  {where}" if where else ""), 9, PAGE_W - 2 * M - 290), 9)
+                y -= row_h
+
         y -= 10
         note = p.get("cover_note") or (
             "Each following page shows one trip: a map of the places we visited, the dates, and a few of the "
@@ -210,6 +255,22 @@ class Report:
         self.text(M, y, f"{fmt_day(a.date())} – {fmt_day(b.date())}  ·  {_nights(t['nights'])}  ·  "
                         f"{t['photo_count']} photos taken", 10, color=MUTED)
         y -= 12
+
+        ev = events(t)[:4]
+        if ev:
+            bh = 10 + 15 * len(ev)
+            self.c.setFillColor(TINT)
+            self.c.roundRect(M, y - bh, PAGE_W - 2 * M, bh, 4, stroke=0, fill=1)
+            ly = y - 15
+            for ph, label in ev:
+                self.star(M + 12, ly + 3.5, 5, ACCENT)
+                self.text(M + 24, ly, self.fit(label, 10.5, 260, bold=True), 10.5, bold=True, color=ACCENT)
+                when = _d(ph["time"])
+                where = _place(t, ph)
+                self.text(M + 290, ly, self.fit(f"{fmt_day(when.date())}, {when.strftime('%H:%M')}"
+                                               + (f"  ·  {where}" if where else ""), 9, PAGE_W - 2 * M - 300), 9)
+                ly -= 15
+            y -= bh + 8
 
         # Map, with stops numbered in the order first visited
         stops = t["stops"]
@@ -245,10 +306,11 @@ class Report:
         by_path = {p["path"]: p for p in t["photos"]}
         sel = [by_path[s] for s in t.get("selected", []) if s in by_path]
         if sel:
-            self.photo_grid(sel, stops, M, 44, PAGE_W - 2 * M, y - 44)
+            self.photo_grid(sel, t, M, 44, PAGE_W - 2 * M, y - 44)
         self.footer()
 
-    def photo_grid(self, photos, stops, x, y, w, h):
+    def photo_grid(self, photos, trip, x, y, w, h):
+        labels = dict((p["path"], label) for p, label in events(trip))
         n = len(photos)
         cols = 1 if n == 1 else 2 if n <= 4 else 3
         rows = math.ceil(n / cols)
@@ -269,10 +331,21 @@ class Report:
                 self.c.setStrokeColor(RULE)
                 self.c.rect(ix, iy, iw, ih)
                 self.text(ix + iw / 2, iy + ih / 2, "Photo could not be opened", 8, color=MUTED, align="center")
+            if p["path"] in labels:
+                # Make highlighted moments stand out: a coloured frame and a label on the photo.
+                c = self.c
+                c.setStrokeColor(ACCENT)
+                c.setLineWidth(3)
+                c.rect(ix, iy, iw, ih, stroke=1, fill=0)
+                c.setLineWidth(1)
+                text = self.fit(labels[p["path"]], 10, iw - 36, bold=True)
+                bw = pdfmetrics.stringWidth(text, self.bold, 10) + 30
+                c.setFillColor(ACCENT)
+                c.rect(ix, iy + ih - 20, bw, 20, stroke=0, fill=1)
+                self.star(ix + 11, iy + ih - 9.5, 5, HexColor("#ffffff"))
+                self.text(ix + 21, iy + ih - 13.5, text, 10, bold=True, color=HexColor("#ffffff"))
             when = _d(p["time"])
-            place = ""
-            if p.get("stop") is not None and p["stop"] < len(stops):
-                place = geo.place_label(stops[p["stop"]].get("place") or {})
+            place = _place(trip, p)
             line1 = f"{fmt_day(when.date())}, {when.strftime('%H:%M')}" + (f"  ·  {place}" if place else "")
             self.text(ix, iy - 10, self.fit(line1, 8, max(iw, 120)), 8)
             src = os.path.basename(p["path"]) + (f"  ·  {p['camera']}" if p.get("camera") else "")

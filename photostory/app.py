@@ -87,6 +87,8 @@ class App:
                     t[k] = e[k]
             if "selected" in e:
                 t["selected"] = [s for s in e["selected"] if s in paths]
+            if "events" in e:
+                t["events"] = {k: v.strip()[:80] for k, v in e["events"].items() if k in paths and v.strip()}
             t["edited"] = True
         pipeline.save_project(self.out_dir, proj)
         return proj

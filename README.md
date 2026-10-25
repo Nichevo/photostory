@@ -23,7 +23,7 @@ These screenshots use made-up demo photos and names. In the real app the maps ar
 
 <img src="docs/screenshots/app-pick.png" width="800" alt="The list of trips found, with tick boxes, dates, nights and places">
 
-**Check each trip and swap photos** (green tags mark photos where both of you were recognised)
+**Check each trip, swap photos and mark highlights** (green tags mark photos where both of you were recognised)
 
 <img src="docs/screenshots/app-review.png" width="800" alt="Reviewing a trip: the chosen photos and other photos to pick from">
 
@@ -77,6 +77,9 @@ To remove it all later, run `conda env remove -n photostory` and delete the fold
    analysed for the trips you tick, so this stays quick even if you scanned years of photos.
 7. Check each trip: rename it, click photos to add or remove them, and add a note if it helps
    (e.g. "Sam's sister's wedding"). You can tick more trips later and choose photos for those too.
+   To make a special moment stand out, such as getting engaged or a dinner with family, type it in the
+   **Add highlight** box under that photo. In the PDF, highlighted photos get a coloured frame and label,
+   and the highlights are listed at the top of the trip page and on the cover page.
 8. Click **Make PDF**. PDFs are saved in the `PhotoStory` folder in your home folder.
 
 Your edits are kept if you run **Find trips** again with a wider date range.
