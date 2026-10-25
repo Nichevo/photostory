@@ -4,7 +4,7 @@ from datetime import datetime
 from .images import open_upright, sharpness
 from .util import load_json, save_json
 
-MAX_ANALYSED_PER_TRIP = 150
+MAX_ANALYSED_PER_TRIP = 800
 
 
 def _even_sample(items, n):
@@ -18,7 +18,14 @@ def analyse_trip(trip, matcher, cache_path, progress=None):
     """Fill in "score", "people" and "faces" for a sample of the trip's photos."""
     cache = load_json(cache_path, {})
     sig = ",".join(sorted(matcher.people)) if matcher else "-"
-    sample = _even_sample(trip["photos"], MAX_ANALYSED_PER_TRIP)
+    # Skip burst shots (several photos within a few seconds) so the time goes on different moments.
+    distinct, last = [], None
+    for p in trip["photos"]:
+        t = datetime.fromisoformat(p["time"])
+        if last is None or (t - last).total_seconds() > 3:
+            distinct.append(p)
+        last = t
+    sample = _even_sample(distinct, MAX_ANALYSED_PER_TRIP)
     for n, p in enumerate(sample, 1):
         key = f"{sig}|{p['path']}|{p.get('w')}x{p.get('h')}"
         res = cache.get(key)

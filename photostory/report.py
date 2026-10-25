@@ -48,9 +48,9 @@ def fmt_day(d):
 
 def fmt_range(a, b):
     if a == b:
-        return f"{a.day} {a.strftime('%B %Y')}"
+        return f"{a.day} {a.strftime('%b %Y')}"
     if (a.year, a.month) == (b.year, b.month):
-        return f"{a.day}–{b.day} {b.strftime('%B %Y')}"
+        return f"{a.day}–{b.day} {b.strftime('%b %Y')}"
     if a.year == b.year:
         return f"{a.day} {a.strftime('%b')} – {b.day} {b.strftime('%b %Y')}"
     return f"{a.day} {a.strftime('%b %Y')} – {b.day} {b.strftime('%b %Y')}"
@@ -293,7 +293,10 @@ class Report:
             when = fmt_range(_d(s["first"]).date(), _d(s["last"]).date())
             extra = f" · {_nights(s['nights'])}" if s.get("nights") else ""
             self.text(cx, cy, str(num[i]), 8, bold=True, color=ACCENT)
-            self.text(cx + 14, cy, self.fit(f"{label}  —  {when}{extra}", 8.5, col_w - 20), 8.5)
+            # Shorten the place name rather than the dates and nights.
+            tail = f"  —  {when}{extra}"
+            room = col_w - 24 - pdfmetrics.stringWidth(tail, self.font, 8.5)
+            self.text(cx + 14, cy, self.fit(label, 8.5, max(room, 40)) + tail, 8.5)
         y -= math.ceil(len(shown) / 2) * 14 + 4
 
         if t.get("notes"):
@@ -302,17 +305,27 @@ class Report:
                 y -= 13
             y -= 4
 
-        # Photos
+        # Photos: four on the trip's page, then more pages of six if more were chosen
         by_path = {p["path"]: p for p in t["photos"]}
         sel = [by_path[s] for s in t.get("selected", []) if s in by_path]
-        if sel:
-            self.photo_grid(sel, t, M, 44, PAGE_W - 2 * M, y - 44)
+        first, rest = sel[:4], sel[4:]
+        if first:
+            self.photo_grid(first, t, M, 44, PAGE_W - 2 * M, y - 44)
         self.footer()
+        while rest:
+            page, rest = rest[:6], rest[6:]
+            y = PAGE_H - M - 6
+            self.text(M, y, f"TRIP {n} (CONTINUED)", 9, bold=True, color=ACCENT)
+            y -= 20
+            self.text(M, y, self.fit(t.get("title", ""), 14, PAGE_W - 2 * M, bold=True), 14, bold=True)
+            y -= 16
+            self.photo_grid(page, t, M, 44, PAGE_W - 2 * M, y - 44, cols=2)
+            self.footer()
 
-    def photo_grid(self, photos, trip, x, y, w, h):
+    def photo_grid(self, photos, trip, x, y, w, h, cols=None):
         labels = dict((p["path"], label) for p, label in events(trip))
         n = len(photos)
-        cols = 1 if n == 1 else 2 if n <= 4 else 3
+        cols = cols or (1 if n == 1 else 2 if n <= 4 else 3)
         rows = math.ceil(n / cols)
         gap, cap = 10, 22
         cw = (w - gap * (cols - 1)) / cols

@@ -84,8 +84,11 @@ def search(text):
     return None
 
 
-def place_label(p, with_country=True):
-    city, country = p.get("city", ""), p.get("country", "")
-    if city and country and with_country:
-        return f"{city}, {country}"
-    return city or p.get("region", "") or country
+def place_label(p, with_country=True, with_region=True):
+    """e.g. "Pudong, Shanghai, China". The region is left out when it repeats the city."""
+    parts = []
+    for part in (p.get("city", ""), p.get("region", "") if with_region else "", p.get("country", "") if with_country else ""):
+        part = (part or "").strip()
+        if part and not any(part.lower() in q.lower() or q.lower() in part.lower() for q in parts):
+            parts.append(part)
+    return ", ".join(parts)

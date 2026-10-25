@@ -109,11 +109,14 @@ def list_photos(folder):
                 yield os.path.join(root, f)
 
 
-def scan_folder(folder, cache_path, date_from=None, date_to=None, progress=None):
+def scan_folder(folder, cache_path, date_from=None, date_to=None, progress=None, stats=None):
     """Read metadata for every photo under folder. Results are cached by path, size and mtime.
 
     date_from/date_to are datetime.date; photos outside the range (or with no date) are dropped.
+    stats, if given, is filled with counts that help explain missing trips.
     """
+    stats = stats if stats is not None else {}
+    unreadable = []
     cache = load_json(cache_path, {})
     paths = list(list_photos(folder))
     todo, results = [], []
@@ -139,12 +142,17 @@ def scan_folder(folder, cache_path, date_from=None, date_to=None, progress=None)
             if info is not None:
                 cache[p] = {"key": key, "info": info}
                 results.append(info)
+            else:
+                unreadable.append(p)
             if progress and done % 50 == 0:
                 progress(done, total, "Reading photo dates and locations")
             if done % 2000 == 0:
                 save_json(cache_path, cache)
     save_json(cache_path, cache)
 
+    stats.update({"files": total, "unreadable": len(unreadable), "unreadable_examples": unreadable[:5],
+                  "undated": sum(1 for i in results if not i.get("time")),
+                  "heic_support": "pillow_heif" in globals()})
     out = []
     for info in results:
         if not info.get("time"):

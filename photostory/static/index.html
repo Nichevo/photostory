@@ -37,6 +37,7 @@
   .ph { position:relative; width:150px; height:112px; border-radius:6px; overflow:hidden; cursor:pointer; background:#e6e9ec; border: 3px solid transparent; }
   .ph img { width:100%; height:100%; object-fit:cover; display:block; }
   .ph.sel { border-color: var(--accent); }
+  .loadmore { width:150px; height:112px; font-size:13px; }
   .ph.event { border-color: #d4a017; box-shadow: 0 0 0 2px #f5d77a; }
   .ph.event .num { background: #d4a017; }
   .item { width: 150px; }
@@ -82,7 +83,7 @@
       <div class="row">
         <div><label>Counts as a trip beyond (km from home)</label><input type="number" id="min_km" min="1"></div>
         <div><label>Shortest trip (nights, 0 = include day trips)</label><input type="number" id="min_nights" min="0"></div>
-        <div><label>Photos per trip</label><input type="number" id="photos_per_trip" min="1" max="6"></div>
+        <div><label>Photos per trip</label><input type="number" id="photos_per_trip" min="1" max="16"></div>
       </div>
     </details>
 
@@ -95,6 +96,10 @@
     <h2>2. Pick your trips</h2>
     <p class="meta" id="summary"></p>
     <ul class="notes" id="notes"></ul>
+    <details id="months"><summary>Photos by month (check here if a trip is missing)</summary>
+      <p class="meta">A trip needs photos with a location, taken more than the set distance from home. If a month shows photos but none with a location, the photos there don't have GPS data (for example photos saved from messages, or location turned off for the camera).</p>
+      <div class="tablewrap"><table><thead><tr><th>Month</th><th>Photos</th><th>With location</th><th>Away from home</th><th>Trips found</th></tr></thead><tbody></tbody></table></div>
+    </details>
     <p class="meta">These are the trips found from your photos' dates and locations. Tick the ones you want in the document. You can rename them in the next step.</p>
     <p><button id="all">Tick all</button> <button id="none">Untick all</button></p>
     <div class="tablewrap"><table id="triptable"><thead><tr><th></th><th>Trip</th><th>Dates</th><th>Nights</th><th>Places</th><th>Photos</th></tr></thead><tbody></tbody></table></div>
@@ -186,6 +191,8 @@ function showProject(p) {
   $("summary").textContent = `${p.photo_total} photos looked at. Found ${p.trips.length} trips, ${nights} nights away.` +
     (p.people && p.people.length ? ` Looking for: ${p.people.join(" and ")}.` : "");
   $("notes").innerHTML = (p.notes || []).map(n => `<li>${esc(n)}</li>`).join("");
+  $("months").querySelector("tbody").innerHTML = ((p.stats || {}).months || []).map(m =>
+    `<tr><td>${esc(m.month)}</td><td>${m.photos}</td><td>${m.gps}</td><td>${m.away}</td><td>${m.trips || ""}</td></tr>`).join("");
   const body = $("triptable").querySelector("tbody");
   body.innerHTML = "";
   p.trips.forEach((t, i) => {
@@ -241,7 +248,7 @@ function tripCard(t, i) {
     </div>
     <div class="section-label">Chosen for the PDF</div>
     <div class="strip chosen"></div>
-    <div class="section-label">Other photos from this trip <button class="more" style="margin-left:8px;font-size:12px;padding:2px 8px">Show all</button></div>
+    <div class="section-label">Other photos from this trip <button class="more" style="margin-left:8px;font-size:12px;padding:2px 8px">All, in time order</button></div>
     <div class="strip cands"></div>
     <label>Notes for this page <span class="hint">(optional, e.g. "Sam's sister's wedding")</span></label>
     <textarea class="notes-in">${esc(t.notes || "")}</textarea>`;
@@ -250,8 +257,8 @@ function tripCard(t, i) {
     $("triptable").querySelectorAll("tbody tr")[i].children[1].textContent = t.title;
   };
   el.querySelector(".notes-in").oninput = (e) => { t.notes = e.target.value; save(); };
-  let showAll = false;
-  el.querySelector(".more").onclick = (e) => { showAll = !showAll; e.target.textContent = showAll ? "Show fewer" : "Show all"; render(); };
+  let showAll = false, limit = 24;
+  el.querySelector(".more").onclick = (e) => { showAll = !showAll; e.target.textContent = showAll ? "Best first" : "All, in time order"; limit = 24; render(); };
 
   function render() {
     const byPath = Object.fromEntries(t.photos.map(p => [p.path, p]));
@@ -282,9 +289,17 @@ function tripCard(t, i) {
     if (!t.selected.length) chosen.innerHTML = `<p class="meta">No photos chosen. Click photos below to add them.</p>`;
     let rest = t.photos.filter(p => !t.selected.includes(p.path));
     if (showAll) rest.sort((a, b) => a.time.localeCompare(b.time));
-    else rest = rest.filter(p => p.score >= 0).sort((a, b) => b.score - a.score).slice(0, 18);
+    else rest = rest.filter(p => p.score >= 0).sort((a, b) => b.score - a.score);
+    const total = rest.length;
+    rest = rest.slice(0, limit);
     const cands = el.querySelector(".cands");
     cands.innerHTML = "";
+    if (total > limit) {
+      const more = document.createElement("button");
+      more.className = "loadmore"; more.textContent = `Show more (${total - limit} left)`;
+      more.onclick = () => { limit += 48; render(); };
+      setTimeout(() => cands.appendChild(more));
+    }
     rest.forEach(ph => {
       const d = document.createElement("div");
       d.className = "ph"; d.title = new Date(ph.time).toLocaleString() + " · click to add";

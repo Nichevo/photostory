@@ -35,7 +35,8 @@ def run(settings, out_dir, progress=lambda pct, msg: None):
     def scan_progress(done, total, msg):
         progress(int(40 * done / max(total, 1)), f"{msg}: {done} of {total}")
 
-    photos = scan_folder(settings["photos"], os.path.join(cache_dir, "scan.json"), d_from, d_to, scan_progress)
+    stats = {}
+    photos = scan_folder(settings["photos"], os.path.join(cache_dir, "scan.json"), d_from, d_to, scan_progress, stats)
     with_gps = sum(1 for p in photos if p["lat"] is not None)
     progress(40, f"Found {len(photos)} photos in the date range ({with_gps} with a location)")
 
@@ -60,6 +61,14 @@ def run(settings, out_dir, progress=lambda pct, msg: None):
     progress(45, f"Found {len(found)} trips; looking up place names")
     for t in found:
         trips.name_places(t)
+
+    if stats.get("unreadable"):
+        notes.append(f"{stats['unreadable']} photo files couldn't be read, e.g. {stats['unreadable_examples'][0]}."
+                     + ("" if stats.get("heic_support") else " HEIC support (pillow-heif) isn't installed."))
+    if stats.get("undated"):
+        notes.append(f"{stats['undated']} photos have no date in them (often screenshots or images saved from "
+                     "messages), so they were left out.")
+    stats["months"] = month_summary(photos, homes, found, float(settings.get("min_km", 50)))
 
     for t in found:
         t["include"] = True
@@ -86,11 +95,28 @@ def run(settings, out_dir, progress=lambda pct, msg: None):
         "homes": homes,
         "notes": notes,
         "photo_total": len(photos),
+        "stats": stats,
         "trips": found,
     }
     save_project(out_dir, project)
     progress(100, "Done")
     return project
+
+
+def month_summary(photos, homes, found, min_km):
+    """Photos per month, with and without a location, to help spot a trip that wasn't found."""
+    months = {}
+    for p in photos:
+        m = months.setdefault(p["time"][:7], {"month": p["time"][:7], "photos": 0, "gps": 0, "away": 0, "trips": 0})
+        m["photos"] += 1
+        if p["lat"] is not None:
+            m["gps"] += 1
+            if homes and all(geo.haversine_km((p["lat"], p["lon"]), h) > min_km for h in homes):
+                m["away"] += 1
+    for t in found:
+        if t["start"][:7] in months:
+            months[t["start"][:7]]["trips"] += 1
+    return sorted(months.values(), key=lambda m: m["month"], reverse=True)
 
 
 def choose_photos(out_dir, progress=lambda pct, msg: None):

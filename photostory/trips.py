@@ -17,9 +17,20 @@ def guess_home(photos):
     return cells.most_common(1)[0][0]
 
 
-def find_trips(photos, homes, min_km=50, max_gap_hours=36, min_nights=1, min_photos=5, stop_km=30):
+def find_trips(photos, homes, min_km=50, max_gap_hours=36, min_nights=1, min_photos=3, stop_km=30,
+               same_area_km=150, same_area_gap_days=6):
     gps = [p for p in photos if p["lat"] is not None]
     gap = timedelta(hours=max_gap_hours)
+    long_gap = timedelta(days=same_area_gap_days)
+
+    def continues(cur, p):
+        """Does photo p carry on the trip in cur? Days without photos are normal on a trip, so a
+        longer gap is fine while you're still in the same area and no photo was taken at home."""
+        dt = _t(p) - _t(cur[-1])
+        if dt <= gap:
+            return True
+        near = geo.haversine_km((p["lat"], p["lon"]), (cur[-1]["lat"], cur[-1]["lon"])) <= same_area_km
+        return near and dt <= long_gap
 
     def away(p):
         return all(geo.haversine_km((p["lat"], p["lon"]), h) > min_km for h in homes)
@@ -27,7 +38,7 @@ def find_trips(photos, homes, min_km=50, max_gap_hours=36, min_nights=1, min_pho
     raw, cur = [], None
     for p in gps:
         if away(p):
-            if cur and _t(p) - _t(cur[-1]) <= gap:
+            if cur and continues(cur, p):
                 cur.append(p)
             else:
                 if cur:
@@ -132,7 +143,7 @@ def trip_title(trip):
         if p.get("country") and p["country"] not in countries:
             countries.append(p["country"])
     if not cities and not countries:
-        return "Trip " + datetime.fromisoformat(trip["start"]).strftime("%B %Y")
+        return "Trip " + datetime.fromisoformat(trip["start"]).strftime("%b %Y")
     if len(countries) > 2:
         return _join(countries[:3]) + (" and more" if len(countries) > 3 else "")
     if len(countries) == 2:
