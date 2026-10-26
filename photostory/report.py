@@ -11,7 +11,7 @@ from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfbase.ttfonts import TTFont
 from reportlab.pdfgen import canvas
 
-from . import geo, maps
+from . import geo, maps, trips
 from .images import jpeg_bytes, open_upright
 
 PAGE_W, PAGE_H = A4
@@ -73,7 +73,7 @@ def events(trip):
 
 
 def _place(trip, p):
-    if p.get("stop") is not None and p["stop"] < len(trip["stops"]):
+    if p.get("stop") is not None and p["stop"] < len(trip["stops"]) and p["stop"] in trips.shown_stops(trip):
         return geo.place_label(trip["stops"][p["stop"]].get("place") or {})
     return ""
 
@@ -317,9 +317,9 @@ class Report:
 
         # Map, with stops numbered in the order first visited
         stops = t["stops"]
-        order = sorted(range(len(stops)), key=lambda i: stops[i]["first"])
-        num = {i: k + 1 for k, i in enumerate(order)}
-        if stops:
+        num = stop_numbers(t)
+        order = sorted(num, key=lambda i: num[i])
+        if order:
             img = render_map(trip_map(t), TRIP_MAP_BOX, t.get("map_view"))
             self.image(img, M, y - TRIP_MAP_BOX[1], *TRIP_MAP_BOX, quality=90)
             y -= TRIP_MAP_BOX[1] + 16
@@ -362,6 +362,30 @@ class Report:
             self.text(M, y, self.fit(t.get("title", ""), 14, PAGE_W - 2 * M, bold=True), 14, bold=True)
             y -= 16
             self.photo_grid(page, t, M, 44, PAGE_W - 2 * M, y - 44, cols=2)
+            self.footer()
+        self.closeup_pages(n, t)
+
+    def closeup_pages(self, n, t):
+        """Close-up maps of small areas where lots of photos were taken, four to a page."""
+        found = closeups(t)
+        cw, mh = CLOSEUP_BOX
+        for start in range(0, len(found), 4):
+            y = PAGE_H - M - 6
+            self.text(M, y, f"TRIP {n}: CLOSE-UP MAPS", 9, bold=True, color=ACCENT)
+            y -= 20
+            self.text(M, y, self.fit(t.get("title", ""), 14, PAGE_W - 2 * M, bold=True), 14, bold=True)
+            y -= 14
+            self.text(M, y, "Places where we took lots of photos. Each dot is a photo.", 9, color=MUTED)
+            y -= 14
+            for k, c in enumerate(found[start:start + 4]):
+                r, col = divmod(k, 2)
+                x = M + col * (cw + 16)
+                top = y - r * (mh + 50)
+                self.image(render_map(closeup_map(c), CLOSEUP_BOX), x, top - mh, cw, mh, quality=88)
+                self.text(x, top - mh - 14, self.fit(closeup_name(t, c), 10.5, cw, bold=True), 10.5, bold=True)
+                a, b = _d(c["first"]).date(), _d(c["last"]).date()
+                when = fmt_day(a) if a == b else fmt_range(a, b)
+                self.text(x, top - mh - 27, f"{c['count']} photos  ·  {when}", 9, color=MUTED)
             self.footer()
 
     def photo_grid(self, photos, trip, x, y, w, h, cols=None):
@@ -426,27 +450,69 @@ def map_px(box):
     return int(box[0] * 2.3), int(box[1] * 2.3)
 
 
+def stop_numbers(t):
+    """{stop index: number on the map} for the stops shown, numbered in the order first visited."""
+    shown = trips.shown_stops(t)
+    return {i: k + 1 for k, i in enumerate(sorted(shown, key=lambda i: t["stops"][i]["first"]))}
+
+
 def trip_map(t):
-    stops = t["stops"]
-    order = sorted(range(len(stops)), key=lambda i: stops[i]["first"])
-    num = {i: k + 1 for k, i in enumerate(order)}
-    return {"points": [(s["lat"], s["lon"]) for s in stops], "route": t.get("route"),
-            "labels": [num[i] for i in range(len(stops))], "max_zoom": 12}
+    """The whole trip: every stop shown, joined in the order visited."""
+    num = stop_numbers(t)
+    shown = sorted(num)
+    pos = {i: k for k, i in enumerate(shown)}
+    route = []
+    for i in t.get("route") or []:
+        if i in pos and (not route or route[-1] != pos[i]):
+            route.append(pos[i])
+    return {"points": [(t["stops"][i]["lat"], t["stops"][i]["lon"]) for i in shown], "route": route,
+            "labels": [num[i] for i in shown], "max_zoom": 12}
 
 
-def cover_map(trips):
+def cover_map(trips_):
+    """The first page's map: the whole trip when there's one, else every trip's places, numbered by trip."""
+    if len(trips_) == 1:
+        return trip_map(trips_[0])
     pts, labels = [], []
-    for n, t in enumerate(trips, 1):
-        if t["stops"]:
-            main = max(t["stops"], key=lambda s: s["count"])
-            pts.append((main["lat"], main["lon"]))
-            labels.append(n)
+    for n, t in enumerate(trips_, 1):
+        shown = trips.shown_stops(t)
+        if not shown:
+            continue
+        main = max(shown, key=lambda i: t["stops"][i]["count"])
+        for i in shown:
+            if i == main or t["stops"][i]["count"] >= 3:
+                pts.append((t["stops"][i]["lat"], t["stops"][i]["lon"]))
+                labels.append(n)
     return {"points": pts, "labels": labels, "max_zoom": 10}
+
+
+CLOSEUP_BOX = ((PAGE_W - 2 * M - 16) / 2, 250)
+
+
+def closeup_map(c):
+    return {"points": c["points"], "max_zoom": 17, "dots": True}
+
+
+def closeups(t):
+    """The close-up maps to include for a trip (all found, less those the user turned off)."""
+    off = set(t.get("closeups_off") or [])
+    return [c for c in trips.closeups(t) if c["key"] not in off]
+
+
+def closeup_name(t, c):
+    name = (t.get("closeup_names") or {}).get(c["key"])
+    if name:
+        return name
+    shown = trips.shown_stops(t)
+    if shown:
+        s = t["stops"][min(shown, key=lambda i: geo.haversine_km((c["lat"], c["lon"]), (t["stops"][i]["lat"], t["stops"][i]["lon"])))]
+        return geo.place_label(s.get("place") or {}, with_country=False) or "A favourite spot"
+    return "A favourite spot"
 
 
 def render_map(spec, box, view=None):
     return maps.render(spec["points"], size=map_px(box), route=spec.get("route"), labels=spec.get("labels"),
-                       max_zoom=spec["max_zoom"], view=view)
+                       max_zoom=spec["max_zoom"], view=view, dots=spec.get("dots", False))
 
 
 def cover_photo(project, trips):

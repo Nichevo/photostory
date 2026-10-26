@@ -80,9 +80,10 @@ def fit(points, size, max_zoom=12, min_zoom=2, pad=70):
     return {"zoom": zoom, "lat": lat, "lon": lon}
 
 
-def render(points, size=(1200, 700), route=None, labels=None, max_zoom=12, min_zoom=2, view=None):
+def render(points, size=(1200, 700), route=None, labels=None, max_zoom=12, min_zoom=2, view=None, dots=False):
     """points: [(lat, lon)]; route: list of point indices to join with a line; labels: text per point.
-    view: {"zoom", "lat", "lon"} to show a chosen area instead of fitting all the points."""
+    view: {"zoom", "lat", "lon"} to show a chosen area instead of fitting all the points.
+    dots: draw each point as a small dot (e.g. where each photo was taken) instead of a numbered marker."""
     W, H = size
     view = view or fit(points, size, max_zoom, min_zoom)
     zoom = max(1, min(17, int(view["zoom"])))
@@ -108,7 +109,10 @@ def render(points, size=(1200, 700), route=None, labels=None, max_zoom=12, min_z
         draw.line(line, fill=ACCENT, width=5, joint="curve")
     font = _font(22)
     r = 17
-    for i, (x, y) in enumerate(px):
+    for x, y in (px if dots else []):
+        draw.ellipse([x - 9, y - 9, x + 9, y + 9], fill=(255, 255, 255))
+        draw.ellipse([x - 6, y - 6, x + 6, y + 6], fill=ACCENT)
+    for i, (x, y) in enumerate([] if dots else px):
         draw.ellipse([x - r - 3, y - r - 3, x + r + 3, y + r + 3], fill=(255, 255, 255))
         draw.ellipse([x - r, y - r, x + r, y + r], fill=ACCENT)
         text = str(labels[i]) if labels else str(i + 1)

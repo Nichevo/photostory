@@ -2,7 +2,7 @@
 photos were taken. Everything suggested is ordinary text the user can edit."""
 from datetime import datetime
 
-from . import geo, travel
+from . import geo, travel, trips
 
 MAX_LOOKUPS = 30  # street-level lookups per trip (about one second each)
 
@@ -59,6 +59,16 @@ def suggest(trip, progress=lambda done, total: None):
         # Famous landmarks nearby, e.g. the Great Wall or Sky Tower.
         info[pt]["landmark"] = geo.surroundings(*pt).get("landmark", "")
         progress(n, len(points))
+
+    # Names for the close-up maps of places where lots of photos were taken.
+    names = trip.setdefault("closeup_names", {})
+    for c in trips.closeups(trip):
+        if c["key"] not in names:
+            here = dict(geo.detail(c["lat"], c["lon"]))
+            here["landmark"] = geo.surroundings(c["lat"], c["lon"]).get("landmark", "")
+            name = caption_for(here)
+            if name:
+                names[c["key"]] = name
 
     captions = trip.setdefault("captions", {})
     modes = {}

@@ -14,7 +14,7 @@ from datetime import datetime
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
-from . import __version__, maps, pipeline, report
+from . import __version__, geo, maps, pipeline, report, trips
 from .images import jpeg_bytes, open_upright
 from .util import load_json, save_json
 
@@ -146,7 +146,7 @@ class App:
             paths = {p["path"] for p in t["photos"]}
             if "title" in e and e["title"] != t.get("title"):
                 t["title_edited"] = True
-            for k in ("title", "notes", "include", "map_view"):
+            for k in ("title", "notes", "include", "map_view", "hidden_stops", "closeups_off"):
                 if k in e:
                     t[k] = e[k]
             if "selected" in e:
@@ -258,6 +258,22 @@ def make_handler(app):
                 return self.send(200, {"version": __version__, "settings": app.settings(), "job": app.job,
                                        "project": app.project(),
                                        "out_dir": app.out_dir, "story": app.current, "stories": app.stories()})
+            if u.path == "/api/mapinfo":
+                # A trip's places (which can be unticked) and its close-up maps, for the map panel.
+                proj = app.project()
+                t = next((t for t in (proj or {}).get("trips", []) if t["id"] == q.get("trip", [""])[0]), None)
+                if not t:
+                    return self.send(404, {"error": "unknown trip"})
+                hidden = set(t.get("hidden_stops") or [])
+                off = set(t.get("closeups_off") or [])
+                stops = sorted(t["stops"], key=lambda s: s["first"])
+                return self.send(200, {
+                    "stops": [{"key": trips.stop_key(s), "count": s["count"], "first": s["first"], "last": s["last"],
+                               "label": geo.place_label(s.get("place") or {}) or f"{s['lat']:.4f}, {s['lon']:.4f}",
+                               "shown": trips.stop_key(s) not in hidden} for s in stops],
+                    "closeups": [{"key": c["key"], "count": c["count"], "first": c["first"], "last": c["last"],
+                                  "name": report.closeup_name(t, c), "include": c["key"] not in off}
+                                 for c in trips.closeups(t)]})
             if u.path == "/api/job":
                 return self.send(200, app.job)
             if u.path == "/thumb":
@@ -280,6 +296,12 @@ def make_handler(app):
                     if not t:
                         return self.send(404, {"error": "unknown trip"})
                     spec, box = report.trip_map(t), report.TRIP_MAP_BOX
+                    key = q.get("closeup", [""])[0]
+                    if key:
+                        c = next((c for c in trips.closeups(t) if c["key"] == key), None)
+                        if not c:
+                            return self.send(404, {"error": "unknown close-up"})
+                        spec, box = report.closeup_map(c), report.CLOSEUP_BOX
                 if not spec["points"]:
                     return self.send(404, {"error": "no locations to map"})
                 if u.path == "/api/mapview":

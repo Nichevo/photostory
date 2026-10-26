@@ -47,6 +47,12 @@
   .mapw .ctl { display:flex; gap:6px; flex-wrap:wrap; margin-top:6px; align-items:center; }
   .mapw .ctl button { min-width: 34px; padding: 4px 8px; }
   details.trip-map summary, #coverbox summary { margin-top: 10px; }
+  .stoplist { margin-top: 8px; display:flex; flex-direction:column; gap:3px; font-size:13px; }
+  .stoplist label, .closeup label { display:flex; gap:6px; align-items:center; font-weight:normal; margin:0; }
+  .stoplist label.off span { color: var(--muted); text-decoration: line-through; }
+  .closeups { display:grid; grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)); gap:10px; margin-top:6px; }
+  .closeup img { width:100%; border-radius:6px; border:1px solid var(--line); display:block; background:#e6e9ec; }
+  .closeup.off img { opacity:.4; }
   .loadmore { width:150px; height:112px; font-size:13px; }
   .ph.event { border-color: #d4a017; box-shadow: 0 0 0 2px #f5d77a; }
   .ph.event .num { background: #d4a017; }
@@ -187,7 +193,7 @@ const FIELDS = ["photos", "people_dir", "timeline", "date_from", "date_to", "hom
 let project = null;
 let saveTimer = null;
 
-const PAGE_VERSION = "0.5.0";  // same as photostory/__init__.py
+const PAGE_VERSION = "0.6.0";  // same as photostory/__init__.py
 const RESTART = "PhotoStory has been updated but is still running the old version. Close its black window (or press Ctrl+C in it), start it again, then reload this page.";
 
 async function api(path, body) {
@@ -409,7 +415,7 @@ function toLL(x, y, z) {
 }
 
 async function mapWidget(box, key, getView, setView) {
-  const def = await api("/api/mapview?trip=" + encodeURIComponent(key));
+  let def = await api("/api/mapview?trip=" + encodeURIComponent(key));
   let cur = getView() || {zoom: def.zoom, lat: def.lat, lon: def.lon};
   box.innerHTML = `<img alt="Map preview"><div class="ctl">
     <button data-z="-1" title="Zoom out">−</button><button data-z="1" title="Zoom in">+</button>
@@ -429,6 +435,53 @@ async function mapWidget(box, key, getView, setView) {
   });
   box.querySelector("[data-reset]").onclick = () => { cur = {zoom: def.zoom, lat: def.lat, lon: def.lon}; setView(null); show(); };
   show();
+  // Redraw after the places on the map change; a map not moved by hand fits the new places.
+  return async () => {
+    def = await api("/api/mapview?trip=" + encodeURIComponent(key));
+    if (!getView()) cur = {zoom: def.zoom, lat: def.lat, lon: def.lon};
+    show();
+  };
+}
+
+async function mapPanel(md, t) {
+  const refresh = await mapWidget(md.querySelector(".mapw"), t.id, () => t.map_view, v => { t.map_view = v; save(); });
+  const draw = async () => {
+    const info = await api("/api/mapinfo?trip=" + encodeURIComponent(t.id));
+    const list = md.querySelector(".stoplist");
+    list.innerHTML = info.stops.length > 1 ? `<div class="meta">Places on the map. Untick any that are wrong and they're left off the maps.</div>` : "";
+    if (info.stops.length > 1) info.stops.forEach(s => {
+      const l = document.createElement("label");
+      l.className = s.shown ? "" : "off";
+      l.innerHTML = `<input type="checkbox" ${s.shown ? "checked" : ""}><span>${esc(s.label)}</span><span class="meta">${s.count} photos · ${fmt(s.first)}${s.first.slice(0, 10) === s.last.slice(0, 10) ? "" : " to " + fmt(s.last)}</span>`;
+      l.querySelector("input").onchange = async (e) => {
+        const hidden = new Set(t.hidden_stops || []);
+        e.target.checked ? hidden.delete(s.key) : hidden.add(s.key);
+        t.hidden_stops = [...hidden];
+        await api("/api/project", edits());
+        refresh(); draw();
+      };
+      list.appendChild(l);
+    });
+    const box = md.querySelector(".closeups");
+    md.querySelector(".closeups-label").classList.toggle("hidden", !info.closeups.length);
+    box.innerHTML = "";
+    info.closeups.forEach(c => {
+      const d = document.createElement("div");
+      d.className = "closeup" + (c.include ? "" : " off");
+      d.innerHTML = `<img loading="lazy" alt="Close-up map" src="/map?trip=${encodeURIComponent(t.id)}&closeup=${encodeURIComponent(c.key)}&n=${t.hidden_stops ? t.hidden_stops.length : 0}">
+        <label><input type="checkbox" ${c.include ? "checked" : ""}> <b>${esc(c.name)}</b></label>
+        <div class="meta">${c.count} photos · ${fmt(c.first)}${c.first.slice(0, 10) === c.last.slice(0, 10) ? "" : " to " + fmt(c.last)}</div>`;
+      d.querySelector("input").onchange = (e) => {
+        const off = new Set(t.closeups_off || []);
+        e.target.checked ? off.delete(c.key) : off.add(c.key);
+        t.closeups_off = [...off];
+        d.classList.toggle("off", !e.target.checked);
+        save();
+      };
+      box.appendChild(d);
+    });
+  };
+  draw();
 }
 
 function renderCover() {
@@ -511,7 +564,9 @@ function tripCard(t, i) {
         <p class="meta">Trip ${i + 1} · ${fmt(t.start)} to ${fmt(t.end)} · ${nightsText(t.nights)} · ${t.photo_count} photos${stops.length ? " · " + esc(stops.join(", ")) : ""}</p>
       </div>
     </div>
-    <details class="trip-map"><summary>Map: change the area shown</summary><div class="mapw"></div></details>
+    <details class="trip-map"><summary>Map: places, area shown and close-ups</summary><div class="stoplist"></div><div class="mapw"></div>
+      <div class="section-label closeups-label hidden">Close-up maps <span class="hint">(places where you took lots of photos; ticked ones get a page in the PDF)</span></div>
+      <div class="closeups"></div></details>
     <div class="section-label">Chosen for the PDF</div>
     <div class="strip chosen"></div>
     <div class="section-label">Other photos from this trip <button class="more" style="margin-left:8px;font-size:12px;padding:2px 8px">All, in time order</button></div>
@@ -528,7 +583,7 @@ function tripCard(t, i) {
   const md = el.querySelector(".trip-map");
   if (!t.stops.length) md.classList.add("hidden");
   md.addEventListener("toggle", () => {
-    if (md.open && !md.dataset.ready) { md.dataset.ready = 1; mapWidget(md.querySelector(".mapw"), t.id, () => t.map_view, v => { t.map_view = v; save(); }); }
+    if (md.open && !md.dataset.ready) { md.dataset.ready = 1; mapPanel(md, t); }
   });
   let showAll = false, limit = 24;
   el.querySelector(".more").onclick = (e) => { showAll = !showAll; e.target.textContent = showAll ? "Best first" : "All, in time order"; limit = 24; render(); };
@@ -600,6 +655,7 @@ function tripCard(t, i) {
 
 function edits() {
   return {title: $("doc_title").value, cover_photo: project.cover_photo || null, cover_map_view: project.cover_map_view || null, trips: project.trips.map(t => ({id: t.id, title: t.title, notes: t.notes, include: t.include, map_view: t.map_view || null,
+    hidden_stops: t.hidden_stops || [], closeups_off: t.closeups_off || [],
     // Until photos are chosen for a trip, its selection belongs to the server.
     selected: t.analysed ? t.selected : undefined, events: t.analysed ? t.events : undefined,
     captions: t.analysed ? t.captions : undefined, stars: t.analysed ? t.stars : undefined}))};

@@ -266,3 +266,46 @@ def manual_trip(photos, start_day, end_day, stop_km=30):
     trip["tz"] = Counter(p["tz"] for p in members if p.get("tz")).most_common(1)[0][0] if any(
         p.get("tz") for p in members) else ""
     return trip
+
+
+def stop_key(s):
+    """A stop's identity that survives refreshing trips: its position, to about 100 m."""
+    return f"{s['lat']:.3f},{s['lon']:.3f}"
+
+
+def shown_stops(trip):
+    """Indexes of the stops to show on maps; the user can untick wrong ones."""
+    hidden = set(trip.get("hidden_stops") or [])
+    return [i for i, s in enumerate(trip["stops"]) if stop_key(s) not in hidden]
+
+
+CLOSEUP_KM = 0.6  # photos this close together count as one spot
+CLOSEUP_MIN_TRIP_KM = 5  # a trip smaller than this already has a close-up map
+
+
+def closeups(trip, limit=4):
+    """Small areas where lots of photos were taken, which may be special places worth a
+    close-up map: [{"key", "lat", "lon", "count", "points", "first", "last"}], busiest first."""
+    keep = set(shown_stops(trip))
+    pts = [p for p in trip["photos"] if p.get("lat") is not None and (p.get("stop") is None or p["stop"] in keep)]
+    if len(pts) < 6:
+        return []
+    lats, lons = [p["lat"] for p in pts], [p["lon"] for p in pts]
+    if geo.haversine_km((min(lats), min(lons)), (max(lats), max(lons))) < CLOSEUP_MIN_TRIP_KM:
+        return []
+    groups = []
+    for p in sorted(pts, key=lambda p: p["time"]):
+        for g in groups:
+            if geo.haversine_km((p["lat"], p["lon"]), (g["lat"], g["lon"])) < CLOSEUP_KM:
+                g["ps"].append(p)
+                n = len(g["ps"])
+                g["lat"] += (p["lat"] - g["lat"]) / n
+                g["lon"] += (p["lon"] - g["lon"]) / n
+                break
+        else:
+            groups.append({"lat": p["lat"], "lon": p["lon"], "ps": [p]})
+    need = max(6, int(len(pts) * 0.1))
+    busy = sorted((g for g in groups if len(g["ps"]) >= need), key=lambda g: -len(g["ps"]))[:limit]
+    return [{"key": f"{g['lat']:.3f},{g['lon']:.3f}", "lat": g["lat"], "lon": g["lon"], "count": len(g["ps"]),
+             "points": [(p["lat"], p["lon"]) for p in g["ps"]][:300],
+             "first": g["ps"][0]["time"], "last": g["ps"][-1]["time"]} for g in busy]

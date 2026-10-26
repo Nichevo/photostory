@@ -248,7 +248,8 @@ def _resplit(t, splits):
     return parts
 
 
-EDIT_KEYS = ("title", "notes", "include", "selected", "events", "captions", "stars", "map_view", "edited")
+EDIT_KEYS = ("title", "notes", "include", "selected", "events", "captions", "stars", "map_view", "edited",
+             "hidden_stops", "closeups_off", "closeup_names")
 
 
 def carry_over(old, found):
@@ -273,7 +274,7 @@ def carry_over(old, found):
         scored = {p["path"]: p for p in best.get("photos", []) if p.get("score", -1) >= 0}
         for p in t["photos"]:
             if p["path"] in scored:
-                for k in ("score", "people", "faces", "unsure"):
+                for k in ("score", "people", "faces", "unsure", "boxes"):
                     if k in scored[p["path"]]:
                         p[k] = scored[p["path"]][k]
         t["analysed"] = bool(best.get("analysed")) and paths <= {p["path"] for p in best.get("photos", [])}
@@ -296,6 +297,8 @@ def split(out_dir, trip_id):
                      events={k: v for k, v in (t.get("events") or {}).items() if k in paths},
                      captions={k: v for k, v in (t.get("captions") or {}).items() if k in paths},
                      stars=[s for s in t.get("stars", []) if s in paths],
+                     hidden_stops=list(t.get("hidden_stops") or []), closeups_off=list(t.get("closeups_off") or []),
+                     closeup_names=dict(t.get("closeup_names") or {}),
                      parts=len(trips.segments(p)))
         project.setdefault("split_parents", {})[trip_id] = t
         project.setdefault("splits", []).append([t["start"], t["end"]])
@@ -316,7 +319,7 @@ def merge(out_dir, parent_id):
         children = [project["trips"][i] for i in idx]
         scored = {p["path"]: p for c in children for p in c["photos"] if p.get("score", -1) >= 0}
         for p in parent["photos"]:
-            for k in ("score", "people", "faces", "unsure"):
+            for k in ("score", "people", "faces", "unsure", "boxes"):
                 if p["path"] in scored and k in scored[p["path"]]:
                     p[k] = scored[p["path"]][k]
         parent.update(include=any(c.get("include", True) for c in children),
@@ -325,6 +328,9 @@ def merge(out_dir, parent_id):
                       events={k: v for c in children for k, v in (c.get("events") or {}).items()},
                       captions={k: v for c in children for k, v in (c.get("captions") or {}).items()},
                       stars=[s for c in children for s in c.get("stars", [])],
+                      hidden_stops=sorted({k for c in children for k in c.get("hidden_stops") or []}),
+                      closeups_off=sorted({k for c in children for k in c.get("closeups_off") or []}),
+                      closeup_names={k: v for c in children for k, v in (c.get("closeup_names") or {}).items()},
                       notes="\n".join(c["notes"] for c in children if c.get("notes")))
         project["trips"][idx[0]:idx[-1] + 1] = [parent]
         project["splits"] = [s for s in project.get("splits", []) if s != [parent["start"], parent["end"]]]
@@ -445,6 +451,7 @@ def write_stories(out_dir, trip_ids, overwrite, progress=lambda pct, msg: None):
                     caps = lt.setdefault("captions", {})
                     for k, v in t.get("captions", {}).items():
                         caps.setdefault(k, v)
+                    lt.setdefault("closeup_names", {}).update(t.get("closeup_names") or {})
                     if overwrite or not (lt.get("notes") or "").strip():
                         lt["notes"] = text
                     lt["edited"] = True

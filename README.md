@@ -99,8 +99,13 @@ map areas), so you can close the app and carry on later.
    Great Wall or Sky Tower, from OpenStreetMap) and spots photos taken on a plane, train or boat
    (from the photo's GPS speed and height, open water or railway lines on the map, and your Google
    Timeline if you added it). It's all editable.
-10. Open **Map: change the area shown** to zoom or move a trip's map, and **Cover page** to choose the
-   cover photo and the overview map's area.
+10. Open **Map: places, area shown and close-ups** under a trip to:
+   * untick places that are wrong (e.g. a bad GPS fix), so they're left off the maps;
+   * zoom or move the trip's map (it shows the whole trip unless you change it);
+   * choose **close-up maps**: PhotoStory spots small areas where you took lots of photos, which are
+     often special places, and gives each ticked one a zoomed-in map on a page after the trip.
+   Open **Cover page** to choose the cover photo and the first page's map area. With one trip, the first
+   page shows that whole trip's map.
 11. Click **Make PDF**. PDFs are saved in the story's folder under `PhotoStory/stories` in your home folder.
 
 ## How trips are worked out

@@ -2,4 +2,4 @@
 
 # Keep in step with PAGE_VERSION in static/index.html: the page uses it to spot an app that
 # was updated without being restarted.
-__version__ = "0.5.0"
+__version__ = "0.6.0"
