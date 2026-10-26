@@ -2,7 +2,7 @@
 photos were taken. Everything suggested is ordinary text the user can edit."""
 from datetime import datetime
 
-from . import geo
+from . import geo, travel
 
 MAX_LOOKUPS = 30  # street-level lookups per trip (about one second each)
 
@@ -55,12 +55,23 @@ def suggest(trip, progress=lambda done, total: None):
     points = points[:MAX_LOOKUPS]
     info = {}
     for n, pt in enumerate(points, 1):
-        info[pt] = geo.detail(*pt)
+        info[pt] = dict(geo.detail(*pt))
+        # Famous landmarks nearby, e.g. the Great Wall or Sky Tower.
+        info[pt]["landmark"] = geo.surroundings(*pt).get("landmark", "")
         progress(n, len(points))
 
     captions = trip.setdefault("captions", {})
+    modes = {}
+    for p in photos:
+        if p["path"] in trip.get("selected", []) or p.get("travel"):
+            here = info.get((p.get("lat"), p.get("lon")), {})
+            m = travel.mode(p, photos, detail=here)
+            if m:
+                modes[p["path"]] = m
+                p["travel"] = m
     for p in chosen:
-        text = spot_name(info.get((p["lat"], p["lon"]), {}))
+        here = info.get((p["lat"], p["lon"]), {})
+        text = caption_for(here, modes.get(p["path"]))
         if text and not captions.get(p["path"]):
             captions[p["path"]] = text
 
@@ -70,14 +81,28 @@ def suggest(trip, progress=lambda done, total: None):
         here = info.get((g[0]["lat"], g[0]["lon"]))
         if not here or g[0].get("stop") is None:
             continue
-        name = here.get("poi") or here.get("area")
+        name = here.get("landmark") or here.get("poi") or here.get("area")
         if name:
             spots.setdefault(g[0]["stop"], {}).setdefault(day, {})
             spots[g[0]["stop"]][day][name] = spots[g[0]["stop"]][day].get(name, 0) + len(g)
-    return write_story(trip, spots)
+    return write_story(trip, spots, sorted(set(modes.values())))
 
 
-def write_story(trip, spots):
+def caption_for(info, mode=""):
+    """A photo's suggested caption: how we were travelling, the landmark, else the spot."""
+    landmark = info.get("landmark")
+    if mode:
+        near = landmark or info.get("poi") or info.get("city")
+        return travel.LABELS[mode] + (f", {near}" if near and mode == "boat" else "")
+    if landmark:
+        return spot_name({"poi": landmark, "city": info.get("city")})
+    return spot_name(info)
+
+
+_BY = {"plane": "flew", "train": "took the train", "boat": "went out on the water"}
+
+
+def write_story(trip, spots, modes=()):
     stops = trip["stops"]
     order = sorted(range(len(stops)), key=lambda i: stops[i]["first"])
     cities = []
@@ -108,4 +133,6 @@ def write_story(trip, spots):
             parts.append(text + ".")
         elif len(shown) > 1:
             parts.append(f"{lead}{stay}." if stay else f"{lead}, we explored together.")
+    if modes:
+        parts.append("Along the way we " + _join([_BY[m] for m in modes]) + " together.")
     return " ".join(parts)

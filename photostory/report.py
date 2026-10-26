@@ -124,15 +124,18 @@ class Report:
             lines.append(line)
         return lines
 
-    def image(self, img, x, y, w, h, contain=True, quality=78):
-        """Draw a PIL image inside the box (x, y, w, h), keeping its shape."""
+    def image(self, img, x, y, w, h, contain=True, quality=78, align_bottom=False):
+        """Draw a PIL image inside the box (x, y, w, h), keeping its shape.
+
+        align_bottom sits it on the box's bottom edge so captions under a row line up."""
         iw, ih = img.size
         s = min(w / iw, h / ih) if contain else max(w / iw, h / ih)
         dw, dh = iw * s, ih * s
         # Passing JPEG bytes lets reportlab embed them as-is, which keeps the PDF small.
         data = ImageReader(io.BytesIO(jpeg_bytes(img, quality)))
-        self.c.drawImage(data, x + (w - dw) / 2, y + (h - dh) / 2, dw, dh)
-        return x + (w - dw) / 2, y + (h - dh) / 2, dw, dh
+        dy = 0 if align_bottom else (h - dh) / 2
+        self.c.drawImage(data, x + (w - dw) / 2, y + dy, dw, dh)
+        return x + (w - dw) / 2, y + dy, dw, dh
 
     def star(self, cx, cy, r, color):
         c = self.c
@@ -188,7 +191,7 @@ class Report:
             hero = cover_photo(self.p, self.trips)
             if hero:
                 try:
-                    img = crop_to(open_upright(hero["path"], 1600), COVER_PHOTO_BOX)
+                    img = crop_to(open_upright(hero["path"], 1600), COVER_PHOTO_BOX, hero.get("boxes"))
                     self.image(img, M, y - COVER_PHOTO_BOX[1], *COVER_PHOTO_BOX)
                     y -= COVER_PHOTO_BOX[1] + 8
                 except Exception:
@@ -377,8 +380,9 @@ class Report:
             bx = x + offset + cidx * (cw + gap)
             by = y + h - (r + 1) * ch - r * gap
             try:
-                img = open_upright(p["path"], 1100)
-                ix, iy, iw, ih = self.image(img, bx, by + cap, cw, ch - cap)
+                # Fill the cell where a modest crop allows it, so photos line up in neat rows.
+                img = crop_to(open_upright(p["path"], 1100), (cw, ch - cap), p.get("boxes"), most=0.35)
+                ix, iy, iw, ih = self.image(img, bx, by + cap, cw, ch - cap, align_bottom=True)
             except Exception:
                 ix, iy, iw, ih = bx, by + cap, cw, ch - cap
                 self.c.setStrokeColor(RULE)
@@ -457,16 +461,52 @@ def cover_photo(project, trips):
     return max(photos, key=lambda p: p.get("score", 0) + (10 if p.get("w", 0) >= p.get("h", 0) else 0))
 
 
-def crop_to(img, box):
-    """Crop the middle of an image to the box's shape, a little above centre where faces usually are."""
+def crop_to(img, box, faces=None, most=1.0):
+    """Crop an image towards the box's shape without cutting off anyone's face.
+
+    faces are boxes as fractions of the image (x, y, w, h). With no faces the crop
+    keeps the lower part of the picture, where people usually are, rather than sky.
+    most limits how much of the picture may be cut away (0.35 = at most 35%).
+    """
     w, h = img.size
     want = box[0] / box[1]
+    faces = [f for f in (faces or []) if len(f) == 4]
     if w / h > want:
-        nw = int(h * want)
-        return img.crop(((w - nw) // 2, 0, (w - nw) // 2 + nw, h))
-    nh = int(w / want)
-    top = max(0, min(h - nh, int((h - nh) * 0.4)))
+        nw = max(int(h * want), int(w * (1 - most)))
+        if nw >= w:
+            return img
+        lo, hi = _keep(faces, 0, w, 0.5)
+        left = _place_window(w, nw, lo, hi, 0.5)
+        return img.crop((left, 0, left + nw, h))
+    nh = max(int(w / want), int(h * (1 - most)))
+    if nh >= h:
+        return img
+    lo, hi = _keep(faces, 1, h, 0.62)
+    top = _place_window(h, nh, lo, hi, 0.62)
     return img.crop((0, top, w, top + nh))
+
+
+def _keep(faces, axis, size, bias):
+    """The span (in pixels) the crop should keep: every face plus some body below it."""
+    if not faces:
+        return None, None
+    lo = min(f[axis] for f in faces) * size
+    hi = max(f[axis] + f[axis + 2] for f in faces) * size
+    if axis == 1:
+        # Keep a little headroom above and some shoulders below the faces.
+        tall = max(f[3] for f in faces) * size
+        lo, hi = lo - tall * 0.4, hi + tall * 1.2
+    return max(0, lo), min(size, hi)
+
+
+def _place_window(size, win, lo, hi, bias):
+    if lo is None:
+        start = (size - win) * bias
+    elif hi - lo >= win:
+        start = lo  # faces don't all fit: keep the top of them, so heads aren't cut
+    else:
+        start = (lo + hi) / 2 - win / 2
+    return int(max(0, min(size - win, start)))
 
 
 def build_pdf(project, out_path):

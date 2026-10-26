@@ -108,6 +108,12 @@ def detail(lat, lon):
             data = _get("https://nominatim.openstreetmap.org/reverse?" + q)
         except Exception:
             return {}
+        if data.get("error"):
+            # Nothing on the map here: usually open water, e.g. on a boat.
+            result = {"poi": "", "area": "", "city": "", "region": "", "country": "", "sea": True}
+            cache[key] = result
+            save_json(_CACHE_PATH, cache)
+            return result
         addr = data.get("address", {})
         poi = ""
         if data.get("name") and data.get("category") in ("tourism", "amenity", "leisure", "historic", "natural",
@@ -118,6 +124,108 @@ def detail(lat, lon):
                           or addr.get("city_district") or "",
                   "city": addr.get("city") or addr.get("town") or addr.get("village") or addr.get("municipality") or "",
                   "region": addr.get("state") or "", "country": addr.get("country") or ""}
+        cache[key] = result
+        save_json(_CACHE_PATH, cache)
+        return result
+
+
+# Landmarks and travel clues from OpenStreetMap (Overpass API), e.g. the Great Wall or Sky Tower.
+OVERPASS = ("https://overpass-api.de/api/interpreter", "https://overpass.kumi.systems/api/interpreter")
+LANDMARK_KM = 0.4
+_SKIP_TOURISM = {"hotel", "guest_house", "hostel", "apartment", "motel", "information", "camp_site",
+                 "caravan_site", "chalet", "picnic_site", "artwork"}
+_NATURAL = {"peak", "volcano", "waterfall", "beach", "bay", "cliff", "glacier", "arch", "cave_entrance", "strait"}
+_MAN_MADE = {"tower", "lighthouse", "bridge", "pier", "observatory", "dam"}
+_WATER = {"water", "bay", "strait"}
+
+
+def _overpass(query):
+    global _last_call
+    data = urllib.parse.urlencode({"data": query}).encode()
+    for url in OVERPASS:
+        wait = 1.1 - (time.time() - _last_call)
+        if wait > 0:
+            time.sleep(wait)
+        _last_call = time.time()
+        try:
+            req = urllib.request.Request(url, data=data, headers={"User-Agent": USER_AGENT})
+            with urllib.request.urlopen(req, timeout=30) as r:
+                return json.loads(r.read().decode("utf-8"))
+        except Exception:
+            continue
+    return None
+
+
+def _landmark_score(tags, dist_km):
+    """How much a mapped place looks like a famous landmark, or None if it isn't one."""
+    t = tags.get("tourism")
+    score = 0.0
+    if t in _SKIP_TOURISM:
+        return None
+    if t:
+        score += 2 if t in ("attraction", "viewpoint", "theme_park", "zoo") else 1
+    if tags.get("historic"):
+        score += 1.5
+    if tags.get("man_made") in _MAN_MADE:
+        score += 2
+    if tags.get("natural") in _NATURAL:
+        score += 1.5
+    if tags.get("heritage") or tags.get("heritage:operator"):
+        score += 1.5
+    if tags.get("amenity") == "place_of_worship" or tags.get("building") in ("cathedral", "temple", "mosque"):
+        score += 1
+    if not score and not tags.get("building"):
+        return None
+    if tags.get("wikipedia"):
+        score += 2
+    return score - min(dist_km, LANDMARK_KM) * 2
+
+
+def surroundings(lat, lon):
+    """Landmarks and travel clues near a point:
+    {"landmark": name or "", "rail": near a railway line, "ferry": near a ferry route, "water": on water}.
+    Empty when offline. Cached."""
+    key = f"o{lat:.3f},{lon:.3f}"
+    with _lock:
+        cache = _load_cache()
+        if key in cache:
+            return cache[key]
+        r = int(LANDMARK_KM * 1000)
+        q = f"""[out:json][timeout:25];
+(
+  nwr(around:{r},{lat:.5f},{lon:.5f})[name][wikidata];
+  way(around:40,{lat:.5f},{lon:.5f})[railway~"^(rail|subway|light_rail|monorail|narrow_gauge)$"];
+  way(around:300,{lat:.5f},{lon:.5f})[route=ferry];
+);
+out tags center 60;
+is_in({lat:.5f},{lon:.5f})->.a;
+area.a[~"^(natural|water|place)$"~"^(water|bay|strait|sea|ocean|harbour|river|lake|reservoir)$"];
+out tags;"""
+        data = _overpass(q)
+        if data is None:
+            return {}
+        best, rail, ferry, water = None, False, False, False
+        for el in data.get("elements", []):
+            tags = el.get("tags", {})
+            if el["type"] == "area":
+                if tags.get("natural") in _WATER or tags.get("place") in ("sea", "ocean") or tags.get("water"):
+                    water = True
+                continue
+            if tags.get("railway"):
+                rail = True
+                continue
+            if tags.get("route") == "ferry":
+                ferry = True
+                continue
+            c = el.get("center") or el
+            if "lat" not in c:
+                continue
+            if tags.get("place") or tags.get("boundary") or tags.get("highway") or tags.get("public_transport"):
+                continue
+            s = _landmark_score(tags, haversine_km((lat, lon), (c["lat"], c["lon"])))
+            if s is not None and s >= 2 and (best is None or s > best[0]):
+                best = (s, tags.get("name:en") or tags["name"])
+        result = {"landmark": best[1] if best else "", "rail": rail, "ferry": ferry, "water": water}
         cache[key] = result
         save_json(_CACHE_PATH, cache)
         return result

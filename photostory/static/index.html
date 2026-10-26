@@ -36,7 +36,7 @@
   .meta { color: var(--muted); font-size: 13px; margin: 4px 0 0; }
   .strip { display:flex; flex-wrap:wrap; gap:8px; margin-top:8px; }
   .ph { position:relative; width:150px; height:112px; border-radius:6px; overflow:hidden; cursor:pointer; background:#e6e9ec; border: 3px solid transparent; }
-  .ph img { width:100%; height:100%; object-fit:cover; display:block; }
+  .ph img { width:100%; height:100%; object-fit:cover; object-position:50% 62%; display:block; }
   .ph.sel { border-color: var(--accent); }
   .faces { display:flex; flex-wrap:wrap; gap:12px; }
   .face { width: 150px; text-align:center; font-size: 13px; }
@@ -187,7 +187,7 @@ const FIELDS = ["photos", "people_dir", "timeline", "date_from", "date_to", "hom
 let project = null;
 let saveTimer = null;
 
-const PAGE_VERSION = "0.4.0";  // same as photostory/__init__.py
+const PAGE_VERSION = "0.5.0";  // same as photostory/__init__.py
 const RESTART = "PhotoStory has been updated but is still running the old version. Close its black window (or press Ctrl+C in it), start it again, then reload this page.";
 
 async function api(path, body) {

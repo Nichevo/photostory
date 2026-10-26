@@ -54,6 +54,8 @@ def apply(p, res, matcher):
     ident = matcher.identify(p["path"], res.get("faces", [])) if matcher else {"people": {}, "unsure": []}
     p["people"] = sorted(ident["people"])
     p["faces"] = len(res.get("faces", []))
+    # Face positions let the PDF crop photos without cutting anyone off.
+    p["boxes"] = [[round(v, 3) for v in f["box"]] for f in res.get("faces", []) if f.get("area", 0) > 0.002]
     p["unsure"] = ident["unsure"]
     p["score"] = round(_score(p, ident["people"], res.get("sharp", 0), matcher), 1)
 

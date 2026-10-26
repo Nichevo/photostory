@@ -36,6 +36,15 @@ def _ll(value):
     return None
 
 
+# Google's activity types, as travel modes worth showing on a photo.
+MODES = {"FLYING": "plane", "IN_TRAIN": "train", "IN_SUBWAY": "train", "IN_TRAM": "train",
+         "IN_FERRY": "boat", "SAILING": "boat", "IN_BOAT": "boat", "BOATING": "boat"}
+
+
+def _mode(kind):
+    return MODES.get(str(kind or "").upper().replace(" ", "_"), "")
+
+
 def _time(value):
     if value is None:
         return None
@@ -52,6 +61,12 @@ class Timeline:
     def __init__(self):
         self.visits = []  # (start, end, lat, lon), UTC datetimes
         self.points = []  # (time, lat, lon)
+        self.moves = []  # (start, end, "plane" | "train" | "boat"), UTC datetimes
+
+    def add_move(self, start, end, kind):
+        start, end, mode = _time(start), _time(end), _mode(kind)
+        if start and end and mode:
+            self.moves.append((start, end, mode))
 
     def add_visit(self, start, end, ll):
         start, end = _time(start), _time(end)
@@ -80,6 +95,8 @@ class Timeline:
                 elif "activitySegment" in obj:
                     a = obj["activitySegment"]
                     d = a.get("duration", {})
+                    self.add_move(d.get("startTimestamp") or d.get("startTimestampMs"),
+                                  d.get("endTimestamp") or d.get("endTimestampMs"), a.get("activityType"))
                     self.add_point(d.get("startTimestamp") or d.get("startTimestampMs"), _ll(a.get("startLocation", {})))
                     self.add_point(d.get("endTimestamp") or d.get("endTimestampMs"), _ll(a.get("endLocation", {})))
             return
@@ -91,6 +108,7 @@ class Timeline:
                 if "visit" in seg:
                     self.add_visit(start, end, _ll(seg["visit"].get("topCandidate", {})))
                 if "activity" in seg:
+                    self.add_move(start, end, (seg["activity"].get("topCandidate") or {}).get("type"))
                     self.add_point(start, _ll(seg["activity"].get("start")))
                     self.add_point(end, _ll(seg["activity"].get("end")))
                 for p in seg.get("timelinePath", []) or []:
@@ -107,6 +125,13 @@ class Timeline:
         self.points.sort()
         self._vstarts = [v[0] for v in self.visits]
         self._ptimes = [p[0] for p in self.points]
+
+    def travel(self, t):
+        """How we were travelling at UTC time t ("plane", "train", "boat"), or ""."""
+        for s, e, mode in self.moves:
+            if s - timedelta(minutes=10) <= t <= e + timedelta(minutes=10):
+                return mode
+        return ""
 
     def span(self):
         times = [v[0] for v in self.visits[:1]] + [v[1] for v in self.visits[-1:]] + \
@@ -163,7 +188,7 @@ def load(paths, cache_dir):
     for f in _files(paths):
         st = os.stat(f)
         key = f"{f}|{st.st_size}|{int(st.st_mtime)}"
-        if key in cache:
+        if key in cache and "m" in cache[key]:
             entry = cache[key]
         else:
             part = Timeline()
@@ -173,12 +198,15 @@ def load(paths, cache_dir):
             except (OSError, ValueError):
                 continue
             entry = {"v": [(s.isoformat(), e.isoformat(), a, b) for s, e, a, b in part.visits],
-                     "p": [(t.isoformat(), a, b) for t, a, b in part.points]}
+                     "p": [(t.isoformat(), a, b) for t, a, b in part.points],
+                     "m": [(s.isoformat(), e.isoformat(), m) for s, e, m in part.moves]}
         fresh[key] = entry
         for s, e, a, b in entry["v"]:
             tl.visits.append((datetime.fromisoformat(s), datetime.fromisoformat(e), a, b))
         for t, a, b in entry["p"]:
             tl.points.append((datetime.fromisoformat(t), a, b))
+        for s, e, m in entry["m"]:
+            tl.moves.append((datetime.fromisoformat(s), datetime.fromisoformat(e), m))
     save_json(cache_path, fresh)
     tl.finish()
     return tl
@@ -197,12 +225,16 @@ def photo_utc(p, fallback_tz):
 
 
 def fill_locations(photos, tl, fallback_tz=None):
-    """Give photos without GPS the location Timeline has for that moment. Returns how many were filled."""
+    """Give photos without GPS the location Timeline has for that moment, and note photos taken
+    while Timeline says we were flying, on a train or on a boat. Returns how many locations were filled."""
     n = 0
     for p in photos:
+        t = photo_utc(p, fallback_tz)
+        mode = tl.travel(t) if t else ""
+        if mode:
+            p["travel"] = mode
         if p["lat"] is not None:
             continue
-        t = photo_utc(p, fallback_tz)
         ll = tl.where(t) if t else None
         if ll:
             p["lat"], p["lon"] = round(ll[0], 6), round(ll[1], 6)

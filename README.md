@@ -88,12 +88,17 @@ map areas), so you can close the app and carry on later.
 7. Tick the trips you want, then click **Choose photos for the ticked trips**. Photos are only
    analysed for the trips you tick, so this stays quick even if you scanned years of photos.
 8. If PhotoStory isn't sure about some faces, it asks **Is this Alex?** Answer and it remembers,
-   for this and every later story. You can also add more reference photos and click
-   **Check faces again**.
+   for this and every later story. If it's someone else who matters, such as one of your children or
+   a parent, click **Someone else important…** and give their name: from then on they're recognised
+   too, and photos of you both with them (e.g. a family dinner) are preferred. You can also add more
+   reference photos and click **Check faces again**.
 9. Check each trip: rename it, click photos to add or remove them, give photos captions, and click
    **Make highlight** for special moments such as getting engaged or dinner with family.
    **Write captions and story** drafts a caption for each photo and a short story of the places you
-   visited each day, from where the photos were taken. It's all editable.
+   visited each day, from where the photos were taken. It names famous landmarks nearby (e.g. the
+   Great Wall or Sky Tower, from OpenStreetMap) and spots photos taken on a plane, train or boat
+   (from the photo's GPS speed and height, open water or railway lines on the map, and your Google
+   Timeline if you added it). It's all editable.
 10. Open **Map: change the area shown** to zoom or move a trip's map, and **Cover page** to choose the
    cover photo and the overview map's area.
 11. Click **Make PDF**. PDFs are saved in the story's folder under `PhotoStory/stories` in your home folder.
@@ -107,6 +112,7 @@ map areas), so you can close the app and carry on later.
 * Within a trip, photos within 30 km of each other are one stop. The nights at each stop are guessed from
   where the last photo of each day was taken.
 * Photos without GPS, taken during a trip, are included in that trip.
+* In the PDF, photos are cropped a little to line up neatly, keeping everyone's face in view.
 * Photos without GPS still show a trip abroad if they were taken in another time zone than home's
   (phones record the time zone). Type where it was under the trip, e.g. `Shanghai, China`.
 * A trip it can't find at all (no GPS and the same time zone as home) can be added by its dates
