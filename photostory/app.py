@@ -361,8 +361,16 @@ def make_handler(app):
                     pipeline.remove_added_trip(app.out_dir, data["id"])
                     return self.send(200, {"project": app.project()})
                 if u.path == "/api/face":
-                    ok = pipeline.name_face(app.out_dir, app.cache_dir, data["path"], data["box"], data.get("name"))
+                    ok = pipeline.name_face(app.out_dir, app.cache_dir, data["path"], data["box"], data.get("name"),
+                                            bool(data.get("family")))
                     return self.send(200 if ok else 400, {"ok": ok, "project": app.project()})
+                if u.path == "/api/forget":
+                    from . import faces
+
+                    app.save_edits(data.get("edits", {}))
+                    faces.forget(data.get("name", ""))
+                    pipeline.recheck_faces(app.out_dir, app.cache_dir)
+                    return self.send(200, {"project": app.project()})
                 if u.path == "/api/recheck":
                     app.save_edits(data.get("edits", {}))
                     pipeline.recheck_faces(app.out_dir, app.cache_dir)

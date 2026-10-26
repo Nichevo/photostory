@@ -127,7 +127,7 @@ def run(settings, out_dir, progress=lambda pct, msg: None, cache_dir=None):
         "places": places,
     }
     if old:
-        for k in ("title", "people", "cover_note", "cover_photo", "cover_map_view"):
+        for k in ("title", "people", "family", "cover_note", "cover_photo", "cover_map_view"):
             if old.get(k):
                 project[k] = old[k]
     save_project(out_dir, project)
@@ -361,7 +361,7 @@ def choose_photos(out_dir, progress=lambda pct, msg: None, cache_dir=None):
         from .faces import FaceMatcher
 
         matcher = FaceMatcher(settings["people_dir"])
-        project["people"] = sorted(matcher.people)
+        project["people"], project["family"] = sorted(matcher.main), sorted(matcher.family)
         project["notes"] = [n for n in project.get("notes", []) if not n.startswith("No ")] + matcher.reference_problems
 
     store = Store(os.path.join(cache_dir, "photos.db"))
@@ -383,12 +383,13 @@ def choose_photos(out_dir, progress=lambda pct, msg: None, cache_dir=None):
                     if not lt.get("selected"):
                         lt["selected"] = t["selected"]
             latest["people"], latest["notes"] = project["people"], project.get("notes", [])
+            latest["family"] = project.get("family", [])
             save_project(out_dir, latest)
     progress(100, "Done")
     return load_project(out_dir)
 
 
-def name_face(out_dir, cache_dir, path, box, name):
+def name_face(out_dir, cache_dir, path, box, name, family=False):
     """The user says a face PhotoStory wasn't sure about is `name` (or None: neither of you).
     Remember it, then re-check every analysed photo with what was learned."""
     from . import faces
@@ -401,8 +402,9 @@ def name_face(out_dir, cache_dir, path, box, name):
         face = next((f for f in (res or {}).get("faces", []) if faces.box_key(path, f["box"]) == faces.box_key(path, box)), None)
         if face is None:
             return False
-        faces.learn(path, face, name)
+        faces.learn(path, face, name, family)
         matcher = faces.FaceMatcher(project["settings"]["people_dir"])
+        project["people"], project["family"] = sorted(matcher.main), sorted(matcher.family)
         for t in project["trips"]:
             if t.get("analysed"):
                 select.rescore(t, matcher, store)
@@ -418,7 +420,7 @@ def recheck_faces(out_dir, cache_dir):
     with LOCK:
         project = load_project(out_dir)
         matcher = FaceMatcher(project["settings"]["people_dir"])
-        project["people"] = sorted(matcher.people)
+        project["people"], project["family"] = sorted(matcher.main), sorted(matcher.family)
         for t in project["trips"]:
             if t.get("analysed"):
                 select.rescore(t, matcher, store)

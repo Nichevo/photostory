@@ -70,14 +70,17 @@ def rescore(trip, matcher, store):
 def _score(p, people, sharp, matcher):
     score = 0.0
     if matcher:
-        wanted = len(matcher.people)
-        present = len(people)
+        wanted = len(matcher.main)
+        present = sum(1 for n in people if n in matcher.main)
+        family = sum(1 for n in people if n in matcher.family)
         if wanted and present == wanted:
             score += 100
+            # Together with family (e.g. a family dinner) is especially good evidence.
+            score += 25 if family else 0
         elif present:
-            score += 35 * present / max(wanted, 1)
+            score += 35 * present / max(wanted, 1) + (10 if family else 0)
         # Bigger faces read better on a printed page.
-        score += 20 * min(1.0, sum(people.values()) * 12)
+        score += 20 * min(1.0, sum(a for n, a in people.items() if n in matcher.main) * 12)
     score += min(10.0, sharp / 60)
     if p.get("lat") is not None:
         score += 5

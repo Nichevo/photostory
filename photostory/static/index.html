@@ -165,7 +165,7 @@
     </div>
     <div class="card hidden" id="facecard">
       <h2>Help me recognise you</h2>
-      <p class="meta">I wasn't sure about these faces. Telling me who they are makes the photo choices better, and I'll remember it for next time.</p>
+      <p class="meta">I wasn't sure about these faces. Telling me who they are makes the photo choices better, and I'll remember it for next time. If it's someone important to your story, like family, choose <b>Someone else important</b> and give their name: photos of you both with them will be preferred.</p>
       <div class="faces" id="faces"></div>
     </div>
     <div class="card hidden" id="refcard">
@@ -348,7 +348,15 @@ $("none").onclick = () => setAll(false);
 function renderFaces() {
   const people = project.people || [];
   $("refcard").classList.toggle("hidden", !people.length);
-  $("refmsg").textContent = people.length ? `Recognising ${people.join(" and ")}. To improve it, add more photos of each of you to your reference folders (one folder per person), then click Check faces again.` : "";
+  const family = project.family || [];
+  $("refmsg").innerHTML = people.length ? `Recognising ${esc(people.join(" and "))}` +
+    (family.length ? `, and family or friends: ${family.map(n => `${esc(n)} <button class="forget" data-n="${esc(n)}" title="Stop recognising ${esc(n)}">×</button>`).join(" ")}` : "") +
+    `. Photos of you both with family score higher. To improve recognition, add more photos of each of you to your reference folders (one folder per person), then click Check faces again.` : "";
+  $("refmsg").querySelectorAll(".forget").forEach(b => b.onclick = async () => {
+    if (!confirm(`Stop recognising ${b.dataset.n}?`)) return;
+    const r = await api("/api/forget", {name: b.dataset.n, edits: edits()});
+    showProject(r.project);
+  });
   const unsure = [];
   project.trips.forEach(t => { if (t.include && t.analysed) t.photos.forEach(p => (p.unsure || []).forEach(f => unsure.push({p, f}))); });
   unsure.sort((a, b) => b.f.sim - a.f.sim);
@@ -359,14 +367,22 @@ function renderFaces() {
     const d = document.createElement("div");
     d.className = "face";
     d.innerHTML = `<img loading="lazy" src="/face?p=${encodeURIComponent(p.path)}&b=${f.box.join(",")}"><div>Is this ${esc(f.name)}?</div>`;
-    [...people, null].forEach(name => {
+    const family = project.family || [];
+    [...people, ...family, "+", null].forEach(name => {
       const b = document.createElement("button");
-      b.textContent = name === null ? "Neither" : name;
+      b.textContent = name === null ? "No one to include" : name === "+" ? "Someone else important…" : name;
+      if (name === "+") b.title = "Family or close friends, e.g. a dinner with family is good evidence";
       b.onclick = async () => {
+        let who = name, fam = false;
+        if (name === "+") {
+          who = (prompt("Who is this? For example: Sam's son Leo") || "").trim();
+          if (!who) return;
+          fam = true;
+        }
         d.style.opacity = .4;
         clearTimeout(saveTimer);
         await api("/api/project", edits());
-        const r = await api("/api/face", {path: p.path, box: f.box, name});
+        const r = await api("/api/face", {path: p.path, box: f.box, name: who, family: fam});
         if (r.project) showProject(r.project);
       };
       d.appendChild(b);
@@ -477,7 +493,9 @@ $("choose").onclick = async () => {
 
 function tag(ph) {
   if (!project.people || !project.people.length || !ph.people) return "";
-  if (ph.people.length && ph.people.length === project.people.length) return `<span class="tag both">Both</span>`;
+  const main = ph.people.filter(n => project.people.includes(n));
+  const fam = ph.people.filter(n => !project.people.includes(n));
+  if (main.length === project.people.length) return `<span class="tag both">Both${fam.length ? " + " + esc(fam.join(", ")) : ""}</span>`;
   if (ph.people.length) return `<span class="tag">${esc(ph.people.join(", "))}</span>`;
   return "";
 }

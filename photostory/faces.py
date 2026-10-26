@@ -63,6 +63,8 @@ class FaceMatcher:
         self.detector = cv2.FaceDetectorYN.create(_model_path("detector"), "", (320, 320), 0.8, 0.3, 5000)
         self.recognizer = cv2.FaceRecognizerSF.create(_model_path("recognizer"), "")
         self.people = {}  # name -> list of feature vectors
+        self.main = []  # the couple: one reference folder each
+        self.family = []  # other important people, named while answering "Is this ...?"
         self.reference_problems = []
         self.learned = load_json(FACES_DIR / "learned.json", {"people": {}, "rejected": []})
         self.rejected = set(self.learned.get("rejected", []))
@@ -90,9 +92,15 @@ class FaceMatcher:
             feats += [decode(x["f"]) for x in self.learned["people"].get(name, [])]
             if feats:
                 self.people[name] = feats
+                self.main.append(name)
             else:
                 self.reference_problems.append(f"No usable reference photos for {name}")
         save_json(FACES_DIR / "references.json", ref_cache)
+        for name in self.learned.get("family", []):
+            feats = [decode(x["f"]) for x in self.learned["people"].get(name, [])]
+            if feats and name not in self.people:
+                self.people[name] = feats
+                self.family.append(name)
 
     def faces(self, path):
         """Detect faces; return [{"box", "area" (fraction of image), "score", "feature"}]."""
@@ -140,12 +148,23 @@ class FaceMatcher:
         return {"people": found, "unsure": unsure}
 
 
-def learn(path, face, name):
-    """Remember a face the user has named (name=None means it's neither of you)."""
+def learn(path, face, name, family=False):
+    """Remember a face the user has named (name=None: nobody to recognise).
+    family=True adds someone important besides the two of you, e.g. a partner's children."""
     data = load_json(FACES_DIR / "learned.json", {"people": {}, "rejected": []})
     key = box_key(path, face["box"])
     if name:
         data["people"].setdefault(name, []).append({"f": face["f"], "from": key})
+        if family and name not in data.setdefault("family", []):
+            data["family"].append(name)
     if key not in data["rejected"]:
         data["rejected"].append(key)  # either way, don't ask about this face again
+    save_json(FACES_DIR / "learned.json", data)
+
+
+def forget(name):
+    """Stop recognising someone added as family."""
+    data = load_json(FACES_DIR / "learned.json", {"people": {}, "rejected": []})
+    data["people"].pop(name, None)
+    data["family"] = [n for n in data.get("family", []) if n != name]
     save_json(FACES_DIR / "learned.json", data)
